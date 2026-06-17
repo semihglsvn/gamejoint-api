@@ -5,7 +5,7 @@ import java.time.LocalDate;
 import java.util.Set;
 
 @Data
-public class GameDetailDTO {
+public class GameDetail {
     private Long id;
     private String title;
     private String description;
