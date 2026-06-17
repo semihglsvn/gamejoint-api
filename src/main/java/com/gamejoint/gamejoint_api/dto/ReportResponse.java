@@ -21,4 +21,4 @@ public class ReportResponse {
     private String status;
     
     private LocalDateTime createdAt;
-}
+}		
