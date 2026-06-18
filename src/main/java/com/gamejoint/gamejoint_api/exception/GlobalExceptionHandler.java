@@ -36,7 +36,12 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Object> handleUnauthorized(InvalidCredentialsException ex) {
         return buildErrorResponse(HttpStatus.UNAUTHORIZED, ex.getMessage());
     }
-
+    
+ // Catch 403 Forbidden (Resource Ownership)
+    @ExceptionHandler(UnauthorizedOperationException.class)
+    public ResponseEntity<Object> handleUnauthorizedOperation(UnauthorizedOperationException ex) {
+        return buildErrorResponse(HttpStatus.FORBIDDEN, ex.getMessage());
+    }
     // The standardized JSON Builder
     private ResponseEntity<Object> buildErrorResponse(HttpStatus status, String message) {
         Map<String, Object> body = new HashMap<>();
