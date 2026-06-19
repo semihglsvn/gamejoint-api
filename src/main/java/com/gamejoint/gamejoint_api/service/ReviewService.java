@@ -28,10 +28,31 @@ public class ReviewService {
         
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
-
+        if (!user.getIsVerified()) {
+            throw new RuntimeException("You must verify your email address before posting a review.");
+        }
         // Guard Clause: Banned users cannot post reviews
         if (user.getIsBanned() != null && user.getIsBanned()) {
             throw new AccountRestrictedException("Your account is restricted. You cannot post reviews.");
+        }
+        
+     // 2. The Staff Block
+        // Roles 1 (Admin), 2 (Editor), 3 (Moderator)
+        if (user.getRole().getId() <= 3) {
+            throw new RuntimeException("Staff members are not permitted to post game reviews.");
+        }
+
+        // 3. The Critic vs. User Scale Validation
+        if (user.getRole().getId() == 4) {
+            // Critic Logic: Out of 100
+            if (request.getScore() < 1 || request.getScore() > 100) {
+                throw new IllegalArgumentException("Critics must provide a rating between 1 and 100.");
+            }
+        } else {
+            // Standard User Logic: Out of 10
+            if (request.getScore() < 1 || request.getScore() > 10) {
+                throw new IllegalArgumentException("Users must provide a rating between 1 and 10.");
+            }
         }
 
         Game game = gameRepository.findById(request.getGameId())
@@ -57,31 +78,43 @@ public class ReviewService {
     }
 
 
-/**
- * Updates an existing review, proving ownership first.
- */
-@Transactional
-public void updateReview(Long userId, Long reviewId, ReviewUpdateRequest request) {
-    
-    // 1. Fetch the existing review
-    Review review = reviewRepository.findById(reviewId)
-            .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
+    /**
+     * Updates an existing review, proving ownership first.
+     */
+    @Transactional
+    public void updateReview(Long userId, Long reviewId, ReviewUpdateRequest request) {
+        
+        // 1. Fetch the existing review
+        Review review = reviewRepository.findById(reviewId)
+                .orElseThrow(() -> new ResourceNotFoundException("Review not found"));
 
-    // 2. The Ownership Guard Clause (Crucial!)
-    // Compare the ID of the user who owns the review against the ID from the secure JWT token
-    if (!review.getUser().getId().equals(userId)) {
-        throw new UnauthorizedOperationException("You can only edit your own reviews.");
+        // 2. Fetch the user to check their role for the scale validation
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        // 3. The Ownership Guard Clause (Crucial!)
+        if (!review.getUser().getId().equals(userId)) {
+            throw new UnauthorizedOperationException("You can only edit your own reviews.");
+        }
+
+        // 4. The Critic vs. User Scale Validation (Protect against illegal updates)
+        if (user.getRole().getId() == 4) {
+            if (request.getScore() < 1 || request.getScore() > 100) {
+                throw new IllegalArgumentException("Critics must provide a rating between 1 and 100.");
+            }
+        } else {
+            if (request.getScore() < 1 || request.getScore() > 10) {
+                throw new IllegalArgumentException("Users must provide a rating between 1 and 10.");
+            }
+        }
+
+        // 5. The Happy Path (Apply changes)
+        review.setScore(request.getScore());
+        review.setComment(request.getComment());
+        
+        // Because of the @Transactional annotation, Hibernate automatically detects 
+        // that the 'review' object changed and writes the UPDATE SQL to MariaDB.
     }
-
-    // 3. The Happy Path (Apply changes)
-    review.setScore(request.getScore());
-    review.setComment(request.getComment());
-    
-    // Because of the @Transactional annotation, Hibernate automatically detects 
-    // that the 'review' object changed and writes the UPDATE SQL to MariaDB.
-    // You don't even need to call reviewRepository.save(review)!
-}
-
 /**
  * Deletes a review, proving ownership first.
  */

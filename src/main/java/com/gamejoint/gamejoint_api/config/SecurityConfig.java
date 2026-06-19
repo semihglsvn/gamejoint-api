@@ -24,12 +24,13 @@ public class SecurityConfig {
             // We disable CSRF because JWTs are immune to traditional CSRF attacks
             .csrf(csrf -> csrf.disable())
             
-            // Define exactly who is allowed to visit which URLs
+         // Define exactly who is allowed to visit which URLs
             .authorizeHttpRequests(auth -> auth
                 
                 // THE PUBLIC LOBBY
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/games/**").permitAll()
+                .requestMatchers("/error").permitAll() // <--- ADD THIS EXACT LINE
                 
                 // THE SECURED VAULT (Requires the Bearer Token)
                 .requestMatchers("/api/reviews/**").authenticated()
@@ -39,7 +40,6 @@ public class SecurityConfig {
                 // Lock down absolutely everything else by default
                 .anyRequest().authenticated()
             )
-            
             // Enforce the "Amnesia" policy. Tell Spring NOT to use server-side sessions.
             .sessionManagement(session -> session.sessionCreationPolicy(SessionCreationPolicy.STATELESS))
             

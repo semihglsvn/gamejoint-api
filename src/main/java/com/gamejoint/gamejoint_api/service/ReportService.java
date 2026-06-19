@@ -27,6 +27,10 @@ public class ReportService {
         
         User user = userRepository.findById(reporterId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        
+        if (!user.getIsVerified()) {
+            throw new RuntimeException("You must verify your email address before submitting a report.");
+        }
                 
         Review review = reviewRepository.findById(request.getReviewId())
                 .orElseThrow(() -> new ResourceNotFoundException("Review not found"));

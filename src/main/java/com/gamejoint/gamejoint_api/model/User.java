@@ -33,10 +33,10 @@ public class User {
     private LocalDate dob;
     
     @Column(name = "is_banned")
-    private Boolean isBanned; // tinyint(1) translates to Boolean automatically
+    private Boolean isBanned; 
     
     @Column(name = "ban_expires_at")
-    private LocalDateTime banExpiresAt; // datetime translates to LocalDateTime
+    private LocalDateTime banExpiresAt; 
     
     @Column(name = "false_report_strikes")
     private Integer falseReportStrikes;
@@ -62,4 +62,39 @@ public class User {
     @CreatedDate
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
+
+    // ==========================================
+    // LIFECYCLE HOOK: Runs instantly before saving
+    // ==========================================
+    @PrePersist
+    protected void onCreate() {
+        // 1. We don't need to check createdAt here because @CreatedDate handles it automatically!
+        
+        // 2. Set the default ban status
+        if (this.isBanned == null) {
+            this.isBanned = false;
+        }
+
+        // 3. Set the default verification status
+        if (this.isVerified == null) {
+            this.isVerified = false;
+        }
+
+        // 4. Set the default role (ID 5 for Standard User)
+        if (this.role == null) {
+            Role defaultRole = new Role();
+            defaultRole.setId(5L); // Assuming your Role entity uses a Long ID
+            this.role = defaultRole;
+        }
+        
+        // 5. Default False Report Strikes to 0
+        if(this.falseReportStrikes == null){
+            this.falseReportStrikes = 0;
+        }
+        
+        // 6. Default Shadowbanned to false
+        if(this.shadowbannedReports == null){
+            this.shadowbannedReports = false;
+        }
+    }
 }
