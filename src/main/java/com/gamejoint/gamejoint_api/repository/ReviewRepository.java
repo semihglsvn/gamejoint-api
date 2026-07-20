@@ -9,8 +9,15 @@ import org.springframework.stereotype.Repository;
 @Repository
 public interface ReviewRepository extends JpaRepository<Review, Long> {
 
-    // Spring writes the SQL: SELECT * FROM reviews WHERE game_id = ? 
-    // We use Pageable because popular games might have thousands of reviews!
+    // Keep your original method
     Page<Review> findByGameId(Long gameId, Pageable pageable);
 
+    // --- ADD THIS NEW METHOD ---
+    // Spring automatically writes the SQL to filter by Game, Role ID, and Status
+    Page<Review> findByGameIdAndUserRoleIdAndStatus(
+            Long gameId, 
+            Long roleId, 
+            Review.ReviewStatus status, 
+            Pageable pageable
+    );
 }

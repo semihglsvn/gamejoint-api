@@ -1,6 +1,7 @@
 package com.gamejoint.gamejoint_api.service;
 
 import com.gamejoint.gamejoint_api.dto.ReviewCreateRequest;
+import com.gamejoint.gamejoint_api.dto.ReviewResponse;
 import com.gamejoint.gamejoint_api.dto.ReviewUpdateRequest;
 import com.gamejoint.gamejoint_api.exception.AccountRestrictedException;
 import com.gamejoint.gamejoint_api.exception.ResourceNotFoundException;
@@ -14,6 +15,8 @@ import com.gamejoint.gamejoint_api.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 
 @Service
 @RequiredArgsConstructor
@@ -77,7 +80,37 @@ public class ReviewService {
         reviewRepository.save(review);
     }
 
+    /**
+     * Fetches approved reviews for a specific game, filtered by user role.
+     */
+    @Transactional(readOnly = true)
+    public Page<ReviewResponse> getReviewsForGame(Long gameId, Long roleId, org.springframework.data.domain.Pageable pageable) {
+        
+        // Ensure the game actually exists first
+        Game game = gameRepository.findById(gameId)
+                .orElseThrow(() -> new ResourceNotFoundException("Game not found"));
 
+        // Fetch only APPROVED reviews for this specific game and role
+        Page<Review> reviews = reviewRepository.findByGameIdAndUserRoleIdAndStatus(
+                game.getId(), 
+                roleId, 
+                Review.ReviewStatus.approved, 
+                pageable
+        );
+
+        // Map the database Entities to the lightweight DTOs
+        return reviews.map(review -> {
+            ReviewResponse response = new ReviewResponse();
+            response.setId(review.getId());
+            response.setAuthorUsername(review.getUser().getUsername());
+            response.setAuthorRole(review.getUser().getRole().getRoleName());
+            response.setScore(review.getScore());
+            response.setComment(review.getComment());
+            response.setCreatedAt(review.getCreatedAt());
+            response.setStatus(review.getStatus().name());
+            return response;
+        });
+    }
     /**
      * Updates an existing review, proving ownership first.
      */

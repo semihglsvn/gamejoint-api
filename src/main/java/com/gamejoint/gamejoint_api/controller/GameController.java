@@ -4,11 +4,16 @@ import com.gamejoint.gamejoint_api.dto.GameDetail;
 import com.gamejoint.gamejoint_api.dto.GameSummary;
 import com.gamejoint.gamejoint_api.service.GameService;
 import lombok.RequiredArgsConstructor;
+
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
+
 
 @RestController
 @RequestMapping("/api/games")
@@ -30,18 +35,39 @@ public class GameController {
         return ResponseEntity.ok(gameService.getAllGames(pageable));
     }
 
-    /**
-     * Endpoint: GET /api/games/search?q=witcher
-     * Powers the mobile app's search bar.
-     */
     @GetMapping("/search")
     public ResponseEntity<Page<GameSummary>> searchGames(
-            @RequestParam("q") String query,
+            @RequestParam(required = false) String q,
+            @RequestParam(required = false) Integer minMetascore,
+            @RequestParam(required = false) Boolean hideTbd,
+            @RequestParam(required = false) List<String> genres,
+            @RequestParam(required = false) List<String> platforms,
+            @RequestParam(required = false, defaultValue = "false") Boolean isMatchAll, // NEW!
+            @RequestParam(required = false, defaultValue = "Highest Rated") String sortBy, // NEW!
             @RequestParam(defaultValue = "0") int page,
-            @RequestParam(defaultValue = "20") int size) {
-        
-        PageRequest pageable = PageRequest.of(page, size);
-        return ResponseEntity.ok(gameService.searchGames(query, pageable));
+            @RequestParam(defaultValue = "20") int size
+    ) {
+        // Determine the Sorting Logic
+        Sort sort;
+        switch (sortBy) {
+            case "Lowest Rated":
+                sort = Sort.by(Sort.Direction.ASC, "metascore");
+                break;
+            case "Newest First":
+                sort = Sort.by(Sort.Direction.DESC, "releaseDate");
+                break;
+            case "Oldest First":
+                sort = Sort.by(Sort.Direction.ASC, "releaseDate");
+                break;
+            case "Highest Rated":
+            default:
+                sort = Sort.by(Sort.Direction.DESC, "metascore");
+                break;
+        }
+
+        PageRequest pageable = PageRequest.of(page, size, sort);
+        Page<GameSummary> results = gameService.searchGames(q, minMetascore, hideTbd, genres, platforms, isMatchAll, pageable);
+        return ResponseEntity.ok(results);
     }
 
     /**
@@ -69,7 +95,28 @@ public class GameController {
         PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.DESC, "releaseDate"));
         return ResponseEntity.ok(gameService.getNewReleases(pageable));
     }
+    /**
+     * Endpoint: GET /api/games/featured
+     * Feeds the large hero carousel at the top of the Home Screen.
+     */
+    @GetMapping("/featured")
+    public ResponseEntity<java.util.List<com.gamejoint.gamejoint_api.dto.FeaturedGameResponse>> getFeaturedGames() {
+        return ResponseEntity.ok(gameService.getFeaturedGames());
+    }
 
+    /**
+     * Endpoint: GET /api/games/trending
+     * Feeds the "Trending" horizontal slider (most reviews in last 30 days).
+     */
+    @GetMapping("/trending")
+    public ResponseEntity<Page<GameSummary>> getTrendingGames(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "15") int size) {
+        
+        PageRequest pageable = PageRequest.of(page, size);
+        return ResponseEntity.ok(gameService.getTrendingGames(pageable));
+    }
+    
     /**
      * Endpoint: GET /api/games/452
      * Fetches the heavy details for a single game's dedicated page.
@@ -77,5 +124,7 @@ public class GameController {
     @GetMapping("/{id}")
     public ResponseEntity<GameDetail> getGameById(@PathVariable Long id) {
         return ResponseEntity.ok(gameService.getGameById(id));
+        
+        
     }
 }

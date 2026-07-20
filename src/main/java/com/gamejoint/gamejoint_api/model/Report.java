@@ -32,15 +32,15 @@ public class Report {
 
     @Enumerated(EnumType.STRING)
     @Column(columnDefinition = "enum('pending', 'reviewed', 'ignored')")
-    private ReportStatus status = ReportStatus.PENDING; // Automatically defaults new reports to pending
+    private ReportStatus status = ReportStatus.pending; // Automatically defaults new reports to pending
 
     @CreatedDate
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
     public enum ReportStatus {
-        PENDING,
-        REVIEWED,
-        IGNORED
+        pending,
+        reviewed,
+        ignored
     }
 }

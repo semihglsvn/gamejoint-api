@@ -18,13 +18,11 @@ public class User {
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Long id;
 
-    // This replaces the complex @ManyToMany junction table!
     @ManyToOne(fetch = FetchType.EAGER)
     @JoinColumn(name = "role_id")
     private Role role;
 
     private String username;
-    
     private String email;
     
     @Column(name = "password_hash")
@@ -47,6 +45,7 @@ public class User {
     @Column(name = "remember_token_hash")
     private String rememberTokenHash;
     
+    // --- WEB TOKENS (Preserved) ---
     @Column(name = "reset_token_hash")
     private String resetTokenHash;
     
@@ -59,42 +58,27 @@ public class User {
     @Column(name = "verification_token")
     private String verificationToken;
 
+    // --- NEW MOBILE OTP TOKENS ---
+    @Column(name = "otp_code")
+    private String otpCode;
+
+    @Column(name = "otp_expires_at")
+    private LocalDateTime otpExpiresAt;
+
     @CreatedDate
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
-    // ==========================================
-    // LIFECYCLE HOOK: Runs instantly before saving
-    // ==========================================
     @PrePersist
     protected void onCreate() {
-        // 1. We don't need to check createdAt here because @CreatedDate handles it automatically!
-        
-        // 2. Set the default ban status
-        if (this.isBanned == null) {
-            this.isBanned = false;
-        }
-
-        // 3. Set the default verification status
-        if (this.isVerified == null) {
-            this.isVerified = false;
-        }
-
-        // 4. Set the default role (ID 5 for Standard User)
+        if (this.isBanned == null) this.isBanned = false;
+        if (this.isVerified == null) this.isVerified = false;
         if (this.role == null) {
             Role defaultRole = new Role();
-            defaultRole.setId(5L); // Assuming your Role entity uses a Long ID
+            defaultRole.setId(5L); 
             this.role = defaultRole;
         }
-        
-        // 5. Default False Report Strikes to 0
-        if(this.falseReportStrikes == null){
-            this.falseReportStrikes = 0;
-        }
-        
-        // 6. Default Shadowbanned to false
-        if(this.shadowbannedReports == null){
-            this.shadowbannedReports = false;
-        }
+        if(this.falseReportStrikes == null) this.falseReportStrikes = 0;
+        if(this.shadowbannedReports == null) this.shadowbannedReports = false;
     }
 }

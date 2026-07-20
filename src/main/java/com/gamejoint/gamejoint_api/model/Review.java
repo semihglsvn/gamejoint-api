@@ -35,7 +35,7 @@ public class Review {
     // Tells Hibernate to save the actual word ('APPROVED') instead of a number (0, 1, 2)
     @Enumerated(EnumType.STRING)
     @Column(columnDefinition = "enum('pending', 'approved', 'rejected')")
-    private ReviewStatus status = ReviewStatus.APPROVED; // Sets the auto-approve default instantly
+    private ReviewStatus status = ReviewStatus.approved; // Sets the auto-approve default instantly
 
     @Column(name = "mod_cleared")
     private Boolean modCleared = false; // Maps tinyint(1) and defaults to 0/false
@@ -46,8 +46,8 @@ public class Review {
 
     // Defining the Enum directly inside the class keeps your architecture tidy
     public enum ReviewStatus {
-        PENDING, 
-        APPROVED, 
-        REJECTED
+        pending, 
+        approved, 
+        rejected
     }
 }

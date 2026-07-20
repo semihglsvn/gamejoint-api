@@ -1,5 +1,7 @@
 package com.gamejoint.gamejoint_api.controller;
 
+import com.gamejoint.gamejoint_api.dto.OtpPasswordResetRequest;
+import com.gamejoint.gamejoint_api.dto.OtpVerifyRequest;
 import com.gamejoint.gamejoint_api.dto.PasswordResetExecuteRequest;
 import com.gamejoint.gamejoint_api.dto.TokenResponse;
 import com.gamejoint.gamejoint_api.dto.UserLoginRequest;
@@ -28,8 +30,6 @@ public class AuthController {
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(@RequestBody UserRegistrationRequest request) {
         authService.register(request);
-        
-        // Immediately trigger the verification email after successful registration
         recoveryService.resendVerificationEmail(request.getEmail());
         
         return ResponseEntity.status(HttpStatus.CREATED)
@@ -38,22 +38,18 @@ public class AuthController {
 
     @PostMapping("/login")
     public ResponseEntity<TokenResponse> login(@RequestBody UserLoginRequest request) {
-        // This will throw our custom exceptions if banned, unverified, or wrong password
         String jwtToken = authService.login(request);
-        
-        // Return the VIP pass as a clean JSON object
         return ResponseEntity.ok(new TokenResponse(jwtToken));
     }
 
     // ==========================================
-    // ACCOUNT RECOVERY (PUBLIC ENDPOINTS)
+    // WEB ENDPOINTS (Magic Links)
     // ==========================================
 
     @PostMapping("/verify/resend")
     public ResponseEntity<Map<String, String>> resendVerification(@RequestBody Map<String, String> body) {
-        String identifier = body.get("identifier"); // Can be username or email
+        String identifier = body.get("identifier"); 
         recoveryService.resendVerificationEmail(identifier);
-        
         return ResponseEntity.ok(Map.of("message", "If that account exists and is unverified, a new link has been sent."));
     }
 
@@ -61,14 +57,31 @@ public class AuthController {
     public ResponseEntity<Map<String, String>> forgotPassword(@RequestBody Map<String, String> body) {
         String email = body.get("email");
         recoveryService.requestPasswordReset(email);
-        
-        // Anti-hacker generic response
         return ResponseEntity.ok(Map.of("message", "If an account with that email exists, a password reset link has been sent."));
     }
 
     @PostMapping("/password/reset")
     public ResponseEntity<Map<String, String>> resetPassword(@RequestBody PasswordResetExecuteRequest request) {
         recoveryService.executePasswordReset(request.getToken(), request.getNewPassword());
+        return ResponseEntity.ok(Map.of("message", "Password has been successfully reset. You may now log in."));
+    }
+
+    // ==========================================
+    // MOBILE ENDPOINTS (6-Digit OTP)
+    // ==========================================
+
+    @PostMapping("/verify/otp")
+    public ResponseEntity<Map<String, String>> verifyAccountOtp(@RequestBody OtpVerifyRequest request) {
+        
+        recoveryService.verifyAccountOtp(request.getIdentifier(), request.getOtp());
+        
+        return ResponseEntity.ok(Map.of("message", "Account successfully verified."));
+    }
+
+    @PostMapping("/password/reset/otp")
+    public ResponseEntity<Map<String, String>> resetPasswordOtp(@RequestBody OtpPasswordResetRequest request) {
+        
+        recoveryService.executePasswordResetOtp(request.getEmail(), request.getOtp(), request.getNewPassword());
         
         return ResponseEntity.ok(Map.of("message", "Password has been successfully reset. You may now log in."));
     }

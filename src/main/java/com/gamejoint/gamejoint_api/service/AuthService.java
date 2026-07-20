@@ -7,6 +7,7 @@ import com.gamejoint.gamejoint_api.exception.InvalidCredentialsException;
 import com.gamejoint.gamejoint_api.exception.UserAlreadyExistsException;
 import com.gamejoint.gamejoint_api.model.User;
 import com.gamejoint.gamejoint_api.repository.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -24,46 +25,46 @@ public class AuthService {
     private final PasswordEncoder passwordEncoder;
     private final JwtService jwtService;
     private final RestTemplate restTemplate = new RestTemplate();
+    private final AccountRecoveryService accountRecoveryService;
+    
+    // Inject the HttpServletRequest to check for headers
+    private final HttpServletRequest httpRequest;
 
     @Value("${cloudflare.turnstile.secret}")
     private String turnstileSecret;
 
+    @Value("${mobile.api.secret}")
+    private String mobileApiSecret; // Add this to your application.properties!
+
     @Transactional
     public void register(UserRegistrationRequest request) {
 
-        // 1. Verify they are human first before touching the database
         verifyTurnstile(request.getCfTurnstileResponse());
 
-        // 2. Prevent Duplicate Accounts
         if (userRepository.existsByUsername(request.getUsername())
                 || userRepository.existsByEmail(request.getEmail())) {
             throw new UserAlreadyExistsException("Username or Email is already taken.");
         }
 
-        // 3. Create the Entity
         User user = new User();
         user.setUsername(request.getUsername());
         user.setEmail(request.getEmail());
         user.setDob(request.getDob());
 
-        // Safely hash the password before saving
         user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
 
-        // Defaults
         user.setIsVerified(false);
         user.setIsBanned(false);
         user.setFalseReportStrikes(0);
         user.setShadowbannedReports(false);
 
-        // 4. Save to Database
         userRepository.save(user);
 
-        // TODO: Call AccountRecoveryService to send the verification email here!
+        accountRecoveryService.resendVerificationEmail(user.getEmail()); // The call is now here!
     }
 
     public String login(UserLoginRequest request) {
 
-        // Verify human interaction
         verifyTurnstile(request.getCfTurnstileResponse());
 
         User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
@@ -73,12 +74,10 @@ public class AuthService {
             throw new InvalidCredentialsException("Invalid password.");
         }
 
-        // --- THE BOUNCER CHECKS ---
         if (user.getIsVerified() != null && !user.getIsVerified()) {
             throw new AccountRestrictedException("Your account is not verified. Please check your email.");
         }
 
-        // --- THE LAZY UNBAN AND BANNED CHECK ---
         if (user.getIsBanned() != null && user.getIsBanned()) {
             if (user.getBanExpiresAt() != null && java.time.LocalDateTime.now().isAfter(user.getBanExpiresAt())) {
                 user.setIsBanned(false);
@@ -99,6 +98,13 @@ public class AuthService {
     }
 
     private void verifyTurnstile(String cfResponse) {
+        // --- MOBILE APP BYPASS ---
+        String clientSecretHeader = httpRequest.getHeader("X-Mobile-App-Secret");
+        if (clientSecretHeader != null && clientSecretHeader.equals(mobileApiSecret)) {
+            return; // Skip Cloudflare entirely for authentic native app requests
+        }
+        
+        // --- STANDARD WEB VERIFICATION ---
         if (cfResponse == null || cfResponse.isBlank()) {
             throw new InvalidCredentialsException("Security widget failed to load. Please try again.");
         }
