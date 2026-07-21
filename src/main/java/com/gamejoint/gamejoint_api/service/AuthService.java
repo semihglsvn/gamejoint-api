@@ -21,103 +21,120 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class AuthService {
 
-    private final UserRepository userRepository;
-    private final PasswordEncoder passwordEncoder;
-    private final JwtService jwtService;
-    private final RestTemplate restTemplate = new RestTemplate();
-    private final AccountRecoveryService accountRecoveryService;
-    
-    // Inject the HttpServletRequest to check for headers
-    private final HttpServletRequest httpRequest;
+	private final UserRepository userRepository;
+	private final PasswordEncoder passwordEncoder;
+	private final JwtService jwtService;
+	private final RestTemplate restTemplate = new RestTemplate();
+	private final AccountRecoveryService accountRecoveryService;
+	private final LoginNotificationService loginNotificationService;
+	// Inject the HttpServletRequest to check for headers
+	private final HttpServletRequest httpRequest;
+	private final RateLimitingService rateLimitService; // <--- INJECT IT
+	@Value("${cloudflare.turnstile.secret}")
+	private String turnstileSecret;
 
-    @Value("${cloudflare.turnstile.secret}")
-    private String turnstileSecret;
+	@Value("${mobile.api.secret}")
+	private String mobileApiSecret; // Add this to your application.properties!
 
-    @Value("${mobile.api.secret}")
-    private String mobileApiSecret; // Add this to your application.properties!
+	@Transactional
+	public void register(UserRegistrationRequest request) {
+		String ip = getClientIp(httpRequest);
+		rateLimitService.verifyRegistrationAttempt(ip);
+		verifyTurnstile(request.getCfTurnstileResponse());
 
-    @Transactional
-    public void register(UserRegistrationRequest request) {
+		if (userRepository.existsByUsername(request.getUsername())
+				|| userRepository.existsByEmail(request.getEmail())) {
+			throw new UserAlreadyExistsException("Username or Email is already taken.");
+		}
 
-        verifyTurnstile(request.getCfTurnstileResponse());
+		User user = new User();
+		user.setUsername(request.getUsername());
+		user.setEmail(request.getEmail());
+		user.setDob(request.getDob());
 
-        if (userRepository.existsByUsername(request.getUsername())
-                || userRepository.existsByEmail(request.getEmail())) {
-            throw new UserAlreadyExistsException("Username or Email is already taken.");
-        }
+		user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
 
-        User user = new User();
-        user.setUsername(request.getUsername());
-        user.setEmail(request.getEmail());
-        user.setDob(request.getDob());
+		user.setIsVerified(false);
+		user.setIsBanned(false);
+		user.setFalseReportStrikes(0);
+		user.setShadowbannedReports(false);
 
-        user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+		userRepository.save(user);
 
-        user.setIsVerified(false);
-        user.setIsBanned(false);
-        user.setFalseReportStrikes(0);
-        user.setShadowbannedReports(false);
+		accountRecoveryService.resendVerificationEmail(user.getEmail()); // The call is now here!
+	}
 
-        userRepository.save(user);
+	public String login(UserLoginRequest request) {
+		String ip = getClientIp(httpRequest);
+		rateLimitService.verifyLoginAttempt(ip);
 
-        accountRecoveryService.resendVerificationEmail(user.getEmail()); // The call is now here!
-    }
+		verifyTurnstile(request.getCfTurnstileResponse());
 
-    public String login(UserLoginRequest request) {
+		User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
+				.orElseThrow(() -> new InvalidCredentialsException("No account found with that username or email."));
 
-        verifyTurnstile(request.getCfTurnstileResponse());
+		if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+			throw new InvalidCredentialsException("Invalid password.");
+		}
 
-        User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
-                .orElseThrow(() -> new InvalidCredentialsException("No account found with that username or email."));
+		if (user.getIsVerified() != null && !user.getIsVerified()) {
+			throw new AccountRestrictedException("Your account is not verified. Please check your email.");
+		}
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-            throw new InvalidCredentialsException("Invalid password.");
-        }
+		// --- FIXED: Use the new helper method to bypass the Cloudflare Tunnel mask ---
+		String realIpAddress = getClientIp(httpRequest);
+		loginNotificationService.sendNewLoginAlert(user.getEmail(), realIpAddress, user.getUsername());
 
-        if (user.getIsVerified() != null && !user.getIsVerified()) {
-            throw new AccountRestrictedException("Your account is not verified. Please check your email.");
-        }
+		return jwtService.generateToken(user);
+	}
 
-        if (user.getIsBanned() != null && user.getIsBanned()) {
-            if (user.getBanExpiresAt() != null && java.time.LocalDateTime.now().isAfter(user.getBanExpiresAt())) {
-                user.setIsBanned(false);
-                user.setBanExpiresAt(null);
-                userRepository.save(user);
-            } else {
-                if (user.getBanExpiresAt() != null) {
-                    java.time.format.DateTimeFormatter formatter = java.time.format.DateTimeFormatter.ofPattern("MMM dd, yyyy HH:mm");
-                    String expireDate = user.getBanExpiresAt().format(formatter);
-                    throw new AccountRestrictedException("Your account is suspended until " + expireDate + ".");
-                } else {
-                    throw new AccountRestrictedException("Your account has been permanently banned.");
-                }
-            }
-        }
+	// ==========================================
+	// HELPER: GET REAL IP BEHIND REVERSE PROXY
+	// ==========================================
+	private String getClientIp(HttpServletRequest request) {
+		// 1. Cloudflare's specific header
+		String ip = request.getHeader("CF-Connecting-IP");
 
-        return jwtService.generateToken(user);
-    }
+		// 2. Standard proxy header (if Cloudflare is off but Nginx is on)
+		if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+			ip = request.getHeader("X-Forwarded-For");
+		}
 
-    private void verifyTurnstile(String cfResponse) {
-        // --- MOBILE APP BYPASS ---
-        String clientSecretHeader = httpRequest.getHeader("X-Mobile-App-Secret");
-        if (clientSecretHeader != null && clientSecretHeader.equals(mobileApiSecret)) {
-            return; // Skip Cloudflare entirely for authentic native app requests
-        }
-        
-        // --- STANDARD WEB VERIFICATION ---
-        if (cfResponse == null || cfResponse.isBlank()) {
-            throw new InvalidCredentialsException("Security widget failed to load. Please try again.");
-        }
+		// 3. Fallback to the direct connection (Will be 127.0.0.1 if behind tunnel)
+		if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+			ip = request.getRemoteAddr();
+		}
 
-        String url = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+		// X-Forwarded-For can return multiple IPs (client, proxy1, proxy2).
+		// The first one is always the true client.
+		if (ip != null && ip.contains(",")) {
+			ip = ip.split(",")[0].trim();
+		}
 
-        var request = Map.of("secret", turnstileSecret, "response", cfResponse);
-        
-        @SuppressWarnings("unchecked")
-        Map<String, Object> body = restTemplate.postForObject(url, request, Map.class);
+		return ip;
+	}
 
-        if (body == null || !Boolean.TRUE.equals(body.get("success"))) {
-            throw new InvalidCredentialsException("Cloudflare verification failed. Are you a bot?");
-        }
-    }
+	private void verifyTurnstile(String cfResponse) {
+		// --- MOBILE APP BYPASS ---
+		String clientSecretHeader = httpRequest.getHeader("X-Mobile-App-Secret");
+		if (clientSecretHeader != null && clientSecretHeader.equals(mobileApiSecret)) {
+			return; // Skip Cloudflare entirely for authentic native app requests
+		}
+
+		// --- STANDARD WEB VERIFICATION ---
+		if (cfResponse == null || cfResponse.isBlank()) {
+			throw new InvalidCredentialsException("Security widget failed to load. Please try again.");
+		}
+
+		String url = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+
+		var request = Map.of("secret", turnstileSecret, "response", cfResponse);
+
+		@SuppressWarnings("unchecked")
+		Map<String, Object> body = restTemplate.postForObject(url, request, Map.class);
+
+		if (body == null || !Boolean.TRUE.equals(body.get("success"))) {
+			throw new InvalidCredentialsException("Cloudflare verification failed. Are you a bot?");
+		}
+	}
 }

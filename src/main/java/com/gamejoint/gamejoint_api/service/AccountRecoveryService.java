@@ -5,6 +5,7 @@ import com.gamejoint.gamejoint_api.exception.InvalidCredentialsException;
 import com.gamejoint.gamejoint_api.exception.ResourceNotFoundException;
 import com.gamejoint.gamejoint_api.model.User;
 import com.gamejoint.gamejoint_api.repository.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
@@ -26,7 +27,9 @@ public class AccountRecoveryService {
 
     private final UserRepository userRepository;
     private final EmailService emailService;
-    private final PasswordEncoder passwordEncoder; 
+    private final PasswordEncoder passwordEncoder;
+    private final RateLimitingService rateLimitService;
+    private final HttpServletRequest httpRequest;
 
     @Value("${security.password.pepper}")
     private String pepper;
@@ -35,6 +38,9 @@ public class AccountRecoveryService {
 
     @Transactional
     public void resendVerificationEmail(String identifier) {
+        String ip = getClientIp(httpRequest);
+        rateLimitService.verifyEmailTrigger(ip);
+
         User user = userRepository.findByUsernameOrEmail(identifier, identifier)
                 .orElseThrow(() -> new ResourceNotFoundException("Account not found."));
 
@@ -42,12 +48,10 @@ public class AccountRecoveryService {
             throw new DuplicateResourceException("This account is already verified! You can just log in.");
         }
 
-        // Generate WEB Token
         String verifyToken = UUID.randomUUID().toString();
         user.setVerificationToken(verifyToken);
         String verifyLink = "http://localhost:8080/verify?email=" + user.getEmail() + "&token=" + verifyToken;
 
-        // Generate MOBILE OTP
         String otp = generateOtp();
         user.setOtpCode(otp);
         user.setOtpExpiresAt(LocalDateTime.now().plusMinutes(15));
@@ -83,18 +87,19 @@ public class AccountRecoveryService {
 
     @Transactional
     public void requestPasswordReset(String email) {
+        String ip = getClientIp(httpRequest);
+        rateLimitService.verifyEmailTrigger(ip);
+
         Optional<User> userOptional = userRepository.findByEmail(email);
         if (userOptional.isEmpty()) return; 
 
         User user = userOptional.get();
 
-        // Generate WEB Token
         String rawToken = UUID.randomUUID().toString();
         user.setResetTokenHash(hashToken(rawToken));
         user.setResetTokenExpires(LocalDateTime.now().plusMinutes(15));
         String resetLink = "http://localhost:8080/reset_password?token=" + rawToken + "&email=" + user.getEmail();
 
-        // Generate MOBILE OTP
         String otp = generateOtp();
         user.setOtpCode(otp);
         user.setOtpExpiresAt(LocalDateTime.now().plusMinutes(15));
@@ -138,9 +143,13 @@ public class AccountRecoveryService {
         }
 
         user.setPasswordHash(passwordEncoder.encode(newPassword + pepper));
+        
+        // --- NEW: KICK EVERYONE OUT ---
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        
         user.setResetTokenHash(null);
         user.setResetTokenExpires(null);
-        user.setOtpCode(null); // Clear OTP too!
+        user.setOtpCode(null); 
         user.setOtpExpiresAt(null);
     }
 
@@ -153,9 +162,13 @@ public class AccountRecoveryService {
         if (!validateOtp(user, otp)) throw new InvalidCredentialsException("Invalid or expired code.");
 
         user.setPasswordHash(passwordEncoder.encode(newPassword + pepper));
+        
+        // --- NEW: KICK EVERYONE OUT ---
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        
         user.setOtpCode(null);
         user.setOtpExpiresAt(null);
-        user.setResetTokenHash(null); // Clear Web link too!
+        user.setResetTokenHash(null); 
         user.setResetTokenExpires(null);
     }
 
@@ -173,6 +186,20 @@ public class AccountRecoveryService {
     }
 
     // --- HELPERS ---
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("CF-Connecting-IP");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("X-Forwarded-For");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        }
+        if (ip != null && ip.contains(",")) {
+            ip = ip.split(",")[0].trim();
+        }
+        return ip;
+    }
+
     private String generateOtp() {
         return String.format("%06d", secureRandom.nextInt(1000000));
     }

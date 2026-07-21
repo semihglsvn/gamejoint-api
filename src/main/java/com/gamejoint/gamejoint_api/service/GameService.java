@@ -132,18 +132,28 @@ public class GameService {
 	// ==========================================
 	// PRIVATE MAPPING HELPERS
 	// ==========================================
-
     private GameSummary mapToSummary(Game game) {
         GameSummary dto = new GameSummary();
         dto.setId(game.getId());
         dto.setTitle(game.getTitle());
         dto.setMetascore(game.getMetascore());
         dto.setReleaseDate(game.getReleaseDate());
-        
-        // Use our new optimizer method for the Summary DTO!
         dto.setCoverImage(optimizeImageUrl(game.getCoverImage()));
         
-        // (Map your genres/platforms here as usual)
+        // ACTUAL GENRE MAPPING
+        if (game.getGenres() != null) {
+            dto.setGenres(game.getGenres().stream()
+                .map(genre -> genre.getName())
+                .collect(Collectors.toSet())); // Use toSet() if your DTO expects a Set
+        }
+
+        // OPTIONAL: Map platforms too if your GameSummary needs them
+        if (game.getPlatforms() != null) {
+            dto.setPlatforms(game.getPlatforms().stream()
+                .map(platform -> platform.getName())
+                .collect(Collectors.toSet()));
+        }
+
         return dto;
     }
 

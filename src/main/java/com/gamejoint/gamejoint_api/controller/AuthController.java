@@ -29,9 +29,7 @@ public class AuthController {
 
     @PostMapping("/register")
     public ResponseEntity<Map<String, String>> register(@RequestBody UserRegistrationRequest request) {
-        authService.register(request);
-        recoveryService.resendVerificationEmail(request.getEmail());
-        
+        authService.register(request);        
         return ResponseEntity.status(HttpStatus.CREATED)
                 .body(Map.of("message", "Registration successful. Please check your email to verify your account."));
     }

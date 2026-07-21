@@ -10,6 +10,8 @@ import com.gamejoint.gamejoint_api.model.User;
 import com.gamejoint.gamejoint_api.repository.ReportRepository;
 import com.gamejoint.gamejoint_api.repository.ReviewRepository;
 import com.gamejoint.gamejoint_api.repository.UserRepository;
+
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -21,10 +23,14 @@ public class ReportService {
     private final ReportRepository reportRepository;
     private final UserRepository userRepository;
     private final ReviewRepository reviewRepository;
+    private final RateLimitingService rateLimit;
+    private final HttpServletRequest httpRequest;
 
     @Transactional
     public void createReport(Long reporterId, ReportCreateRequest request) {
-        
+        // 0. Verify Rate Limit (Max 10 reports per hour per user)
+        rateLimit.verifyReportSubmission(reporterId);
+
         User user = userRepository.findById(reporterId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
         
@@ -41,7 +47,6 @@ public class ReportService {
         }
 
         // 2. The Honeypot (Shadowban & Mod Cleared Logic)
-        // We only check the boolean flags here. The 10-strike logic is safely handled by the Admin Panel.
         boolean isShadowbanned = user.getShadowbannedReports() != null && user.getShadowbannedReports();
         boolean isModCleared = review.getModCleared() != null && review.getModCleared();
 

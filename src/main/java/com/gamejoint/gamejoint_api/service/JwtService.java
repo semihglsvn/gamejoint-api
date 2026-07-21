@@ -33,8 +33,22 @@ public class JwtService {
         Map<String, Object> extraClaims = new HashMap<>();
         extraClaims.put("userId", user.getId());
         
-        // If your User object has a Role attached, you can include it too:
-        // extraClaims.put("role", user.getRole().getName()); 
+        // 1. Pack the Role ID so the frontend knows if they are a standard user or staff
+        if (user.getRole() != null) {
+            extraClaims.put("roleId", user.getRole().getId());
+        }
+
+        // 2. Pack the Ban Status to instantly trigger the frontend UI locks
+        extraClaims.put("isBanned", user.getIsBanned() != null ? user.getIsBanned() : false);
+        
+        // 3. Pack the Ban Expiration Time for the modal text
+        if (user.getBanExpiresAt() != null) {
+            extraClaims.put("banExpiration", user.getBanExpiresAt().toString());
+        } else {
+            extraClaims.put("banExpiration", "Permanent");
+        }
+        
+        extraClaims.put("tokenVersion", user.getTokenVersion());
 
         return Jwts.builder()
                 .setClaims(extraClaims)
@@ -81,6 +95,9 @@ public class JwtService {
                 .getBody();
     }
 
+    public Integer extractTokenVersion(String token) {
+        return extractClaim(token, claims -> claims.get("tokenVersion", Integer.class));
+    }
     private Key getSignInKey() {
         byte[] keyBytes = Decoders.BASE64.decode(secretKey);
         return Keys.hmacShaKeyFor(keyBytes);

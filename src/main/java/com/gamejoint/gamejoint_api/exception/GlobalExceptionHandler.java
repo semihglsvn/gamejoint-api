@@ -42,6 +42,11 @@ public class GlobalExceptionHandler {
     public ResponseEntity<Object> handleUnauthorizedOperation(UnauthorizedOperationException ex) {
         return buildErrorResponse(HttpStatus.FORBIDDEN, ex.getMessage());
     }
+    
+    @ExceptionHandler(RateLimitExceededException.class)
+    public ResponseEntity<Object> handleTooManyRequests(RateLimitExceededException ex){
+    	return buildErrorResponse(HttpStatus.TOO_MANY_REQUESTS, ex.getMessage());
+    }
     // The standardized JSON Builder
     private ResponseEntity<Object> buildErrorResponse(HttpStatus status, String message) {
         Map<String, Object> body = new HashMap<>();

@@ -37,12 +37,16 @@ public class ModerationService {
         // Apply the Ban
         targetUser.setIsBanned(true);
 
-        // Calculate the expiration date (or leave it null for permanent)
+        // Calculate the expiration date
         if (request.getDurationDays() != null && request.getDurationDays() > 0) {
             targetUser.setBanExpiresAt(LocalDateTime.now().plusDays(request.getDurationDays()));
         } else {
             targetUser.setBanExpiresAt(null); // Permanent ban
         }
+        
+        // --- NEW: THE KILL SWITCH ---
+        // Incrementing this instantly revokes all of their active JWT tokens.
+        targetUser.setTokenVersion((targetUser.getTokenVersion() == null ? 0 : targetUser.getTokenVersion()) + 1);
         
         userRepository.save(targetUser);
     }
@@ -61,7 +65,10 @@ public class ModerationService {
 
         // Lift the Ban
         targetUser.setIsBanned(false);
-        targetUser.setBanExpiresAt(null); // Clear the expiration date if they had one
+        targetUser.setBanExpiresAt(null); 
+        
+        // We do not increment the token version here, because they shouldn't have 
+        // any active valid tokens anyway, and we want them to log in normally.
         
         userRepository.save(targetUser);
     }

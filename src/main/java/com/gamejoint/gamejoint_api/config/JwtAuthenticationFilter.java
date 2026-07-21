@@ -32,38 +32,42 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
-        // 1. Look for the "VIP Pass" in the HTTP Headers
         final String authHeader = request.getHeader("Authorization");
 
-        // If there is no token, let the request pass through. 
-        // (Spring Security will block it later if the endpoint is private).
         if (authHeader == null || !authHeader.startsWith("Bearer ")) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        // 2. Extract the raw token string
         final String jwt = authHeader.substring(7);
         final String username = jwtService.extractUsername(jwt);
 
-        // 3. If a username exists and they aren't already authenticated in this cycle
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             
-            // Fetch the user to ensure they haven't been deleted since the token was issued
             User user = userRepository.findByUsername(username).orElse(null);
 
             if (user != null && jwtService.isTokenValid(jwt, user)) {
                 
                 // ==========================================
+                // NEW: TOKEN REVOCATION (SESSION KILL SWITCH)
+                // ==========================================
+                Integer jwtTokenVersion = jwtService.extractTokenVersion(jwt);
+                
+                // If the JWT version doesn't match the database, the session was revoked!
+                if (jwtTokenVersion == null || !jwtTokenVersion.equals(user.getTokenVersion())) {
+                    response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session expired or revoked. Please log in again.");
+                    return;
+                }
+
+                // ==========================================
                 // THE CRITICAL HANDOFF TO THE CONTROLLER
                 // ==========================================
                 request.setAttribute("userId", user.getId());
 
-                // Tell Spring Security: "This user is fully authenticated and allowed in."
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
                         user,
                         null,
-                        new ArrayList<>() // Empty list for roles/authorities
+                        new ArrayList<>() 
                 );
                 
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));
@@ -71,7 +75,6 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
         
-        // Pass the request down the chain to the Controller
         filterChain.doFilter(request, response);
     }
 }

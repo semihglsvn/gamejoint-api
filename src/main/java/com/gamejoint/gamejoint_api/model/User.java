@@ -69,6 +69,9 @@ public class User {
     @Column(name = "created_at", updatable = false)
     private LocalDateTime createdAt;
 
+    @Column(name = "token_version", nullable = false)
+    private Integer tokenVersion = 0;
+    
     @PrePersist
     protected void onCreate() {
         if (this.isBanned == null) this.isBanned = false;
