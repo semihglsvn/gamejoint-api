@@ -58,11 +58,14 @@ public class GameService {
         return games.map(this::mapToSummary);
     }
 
-    @Transactional(readOnly = true)
+	@Transactional(readOnly = true)
     @Cacheable("newReleases")
     public Page<GameSummary> getNewReleases(Pageable pageable) {
-        LocalDate thirtyDaysAgo = LocalDate.now().minusDays(30);
-        Page<Game> games = gameRepository.findByReleaseDateAfter(thirtyDaysAgo, pageable);
+        LocalDate today = LocalDate.now();
+        LocalDate thirtyDaysAgo = today.minusMonths(6);
+
+        Page<Game> games = gameRepository.findByReleaseDateBetween(thirtyDaysAgo, today, pageable);
+        
         return games.map(this::mapToSummary);
     }
     @Transactional(readOnly = true)

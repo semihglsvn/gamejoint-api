@@ -1,19 +1,23 @@
 package com.gamejoint.gamejoint_api.service;
 
 import com.gamejoint.gamejoint_api.dto.AccountDeleteRequest;
+import com.gamejoint.gamejoint_api.dto.EmailChangeRequest;
 import com.gamejoint.gamejoint_api.dto.PasswordChangeRequest;
 import com.gamejoint.gamejoint_api.dto.UserProfileResponse;
-import com.gamejoint.gamejoint_api.dto.UserProfileUpdateRequest;
 import com.gamejoint.gamejoint_api.exception.DuplicateResourceException;
 import com.gamejoint.gamejoint_api.exception.InvalidCredentialsException;
 import com.gamejoint.gamejoint_api.exception.ResourceNotFoundException;
 import com.gamejoint.gamejoint_api.model.User;
 import com.gamejoint.gamejoint_api.repository.UserRepository;
+import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.security.SecureRandom;
+import java.time.LocalDateTime;
 
 @Service
 @RequiredArgsConstructor
@@ -21,13 +25,14 @@ public class UserService {
 
     private final UserRepository userRepository;
     private final PasswordEncoder passwordEncoder;
+    private final EmailService emailService;
+    private final RateLimitingService rateLimitService;
+    private final HttpServletRequest httpRequest;
+    private final SecureRandom secureRandom = new SecureRandom();
 
     @Value("${security.password.pepper}")
     private String pepper;
 
-    /**
-     * Fetches the user's profile data to display on the "Settings" page.
-     */
     @Transactional(readOnly = true)
     public UserProfileResponse getProfile(Long userId) {
         User user = userRepository.findById(userId)
@@ -43,62 +48,101 @@ public class UserService {
         return response;
     }
 
-    /**
-     * Updates basic profile information.
-     */
+    // ==========================================
+    // OTP GENERATION (Settings Guard)
+    // ==========================================
     @Transactional
-    public void updateProfile(Long userId, UserProfileUpdateRequest request) {
+    public void requestSettingsOtp(Long userId) {
+        // 1. Prevent email spam!
+        String ip = getClientIp(httpRequest);
+        rateLimitService.verifyEmailTrigger(ip);
+
         User user = userRepository.findById(userId)
                 .orElseThrow(() -> new ResourceNotFoundException("User not found"));
 
-        // Guard Clause: Prevent changing to a username that someone else already owns
-        if (!user.getUsername().equals(request.getUsername()) && 
-            userRepository.existsByUsername(request.getUsername())) {
-            throw new DuplicateResourceException("That username is already taken.");
-        }
-
-        user.setUsername(request.getUsername());
-        user.setDob(request.getDob());
+        String otp = String.format("%06d", secureRandom.nextInt(1000000));
+        user.setOtpCode(otp);
+        user.setOtpExpiresAt(LocalDateTime.now().plusMinutes(15));
         
-        // @Transactional automatically handles the UPDATE query!
+        String htmlBody = """
+            <div style='background-color: #f4f4f4; padding: 40px 20px; font-family: Arial, sans-serif;'>
+                <table align='center' border='0' cellpadding='0' cellspacing='0' width='600' style='background-color: #ffffff; border-radius: 8px;'>
+                    <tr><td align='center' style='padding: 40px 0; background-color: #1a1a1a;'><img src='cid:logo_img' width='180'></td></tr>
+                    <tr><td style='padding: 40px 30px;'>
+                        <h2 style='color: #333333; margin-top: 0;'>Account Security Request</h2>
+                        <p style='color: #555555;'>Hello <strong>%s</strong>,</p>
+                        <p style='color: #555555;'>You recently requested to make a sensitive change to your GameJoint account settings. Enter this code in the app to proceed:</p>
+                        <div style='text-align: center; margin: 20px 0;'>
+                            <span style='background-color: #f0f0f0; color: #e74c3c; padding: 15px 30px; letter-spacing: 5px; border: 1px solid #dddddd; font-size: 28px; font-weight: bold;'>%s</span>
+                        </div>
+                        <p style='color: #777777; font-size: 12px;'>If you did not request this, please change your password immediately.</p>
+                    </td></tr>
+                </table>
+            </div>
+            """.formatted(user.getUsername(), otp);
+
+        emailService.sendEmailWithLogo(user.getEmail(), "GameJoint Settings Verification Code", htmlBody);
     }
 
-    /**
-     * Changes the user's password securely.
-     */
+    // ==========================================
+    // SENSITIVE ACTIONS (OTP Gated)
+    // ==========================================
+    @Transactional
+    public void changeEmail(Long userId, EmailChangeRequest request) {
+        User user = userRepository.findById(userId).orElseThrow();
+        validateSettingsOtp(user, request.getOtpCode());
+
+        if (userRepository.existsByEmail(request.getNewEmail())) {
+            throw new DuplicateResourceException("That email is already registered to another account.");
+        }
+
+        user.setEmail(request.getNewEmail());
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1); // Kill Switch!
+        clearOtp(user);
+    }
+
     @Transactional
     public void changePassword(Long userId, PasswordChangeRequest request) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = userRepository.findById(userId).orElseThrow();
+        validateSettingsOtp(user, request.getOtpCode());
 
-        // 1. Verify the current password matches MariaDB
-        String pepperedCurrent = request.getCurrentPassword() + pepper;
-        if (!passwordEncoder.matches(pepperedCurrent, user.getPasswordHash())) {
-            throw new InvalidCredentialsException("Incorrect current password.");
-        }
-
-        // 2. Hash and save the new password
         String pepperedNew = request.getNewPassword() + pepper;
         user.setPasswordHash(passwordEncoder.encode(pepperedNew));
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1); // Kill Switch!
+        clearOtp(user);
     }
 
-    /**
-     * Permanently deletes the account.
-     */
     @Transactional
     public void deleteAccount(Long userId, AccountDeleteRequest request) {
-        User user = userRepository.findById(userId)
-                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+        User user = userRepository.findById(userId).orElseThrow();
+        validateSettingsOtp(user, request.getOtpCode());
 
-        // 1. Verify password before executing the deletion
-        String pepperedCurrent = request.getCurrentPassword() + pepper;
-        if (!passwordEncoder.matches(pepperedCurrent, user.getPasswordHash())) {
-            throw new InvalidCredentialsException("Incorrect password. Account deletion aborted.");
+        // Deletes the user entirely. 
+        // (Ensure your MariaDB Foreign Keys are set to ON DELETE CASCADE for reviews/reports!)
+        userRepository.delete(user); 
+    }
+
+    // ==========================================
+    // HELPERS
+    // ==========================================
+    private void validateSettingsOtp(User user, String providedOtp) {
+        if (user.getOtpCode() == null || user.getOtpExpiresAt() == null ||
+            user.getOtpExpiresAt().isBefore(LocalDateTime.now()) ||
+            !user.getOtpCode().equals(providedOtp)) {
+            throw new InvalidCredentialsException("Invalid or expired OTP code.");
         }
+    }
 
-        // 2. Delete the user
-        // Note: Because of foreign keys, you may need to decide if deleting a user 
-        // also deletes their reviews/reports, or if you just "anonymize" the user instead.
-        userRepository.delete(user);
+    private void clearOtp(User user) {
+        user.setOtpCode(null);
+        user.setOtpExpiresAt(null);
+    }
+
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("CF-Connecting-IP");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) ip = request.getHeader("X-Forwarded-For");
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) ip = request.getRemoteAddr();
+        if (ip != null && ip.contains(",")) ip = ip.split(",")[0].trim();
+        return ip;
     }
 }

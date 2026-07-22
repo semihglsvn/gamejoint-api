@@ -3,5 +3,5 @@ import lombok.Data;
 
 @Data
 public class AccountDeleteRequest {
-    private String currentPassword;
+    private String otpCode;
 }

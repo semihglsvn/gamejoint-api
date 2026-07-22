@@ -3,6 +3,7 @@ package com.gamejoint.gamejoint_api.model;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import org.hibernate.annotations.BatchSize; // --- NEW IMPORT ---
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
 
@@ -13,7 +14,7 @@ import java.util.Set;
 @Entity
 @Table(name = "games")
 @Data
-@EntityListeners(AuditingEntityListener.class) // Tells Spring to auto-fill the createdAt date
+@EntityListeners(AuditingEntityListener.class)
 public class Game {
 
     @Id
@@ -47,7 +48,8 @@ public class Game {
         inverseJoinColumns = @JoinColumn(name = "genre_id") 
     )
     @EqualsAndHashCode.Exclude
-    private Set<Genre> genres; // Added 'private' for standard encapsulation
+    @BatchSize(size = 50) // --- STOPS THE N+1 QUERY SPAM ---
+    private Set<Genre> genres;
 
     @ManyToMany
     @JoinTable(
@@ -56,10 +58,10 @@ public class Game {
         inverseJoinColumns = @JoinColumn(name = "platform_id")
     )
     @EqualsAndHashCode.Exclude
-    private Set<Platform> platforms; // Properly mapped the platforms table!
+    @BatchSize(size = 50) // --- STOPS THE N+1 QUERY SPAM ---
+    private Set<Platform> platforms; 
 
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
-
 }

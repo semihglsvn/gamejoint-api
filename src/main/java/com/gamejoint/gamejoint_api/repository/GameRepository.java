@@ -19,7 +19,8 @@ public interface GameRepository extends JpaRepository<Game, Long> , JpaSpecifica
 
 	// Spring writes: SELECT * FROM games WHERE release_date >= ?
 	Page<Game> findByReleaseDateAfter(LocalDate date, Pageable pageable);
-
+	// Add this inside GameRepository.java
+	Page<Game> findByReleaseDateBetween(LocalDate startDate, LocalDate endDate, Pageable pageable);
 	@Query("SELECT g FROM Game g JOIN Review r ON r.game = g WHERE r.createdAt >= :since GROUP BY g.id ORDER BY COUNT(r.id) DESC")
     Page<Game> findTrendingGames(@Param("since") LocalDateTime since, Pageable pageable);
 }
