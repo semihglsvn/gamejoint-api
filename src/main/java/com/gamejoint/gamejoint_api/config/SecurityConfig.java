@@ -3,6 +3,7 @@ package com.gamejoint.gamejoint_api.config;
 import lombok.RequiredArgsConstructor;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.http.HttpMethod;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
 import org.springframework.security.config.http.SessionCreationPolicy;
@@ -24,26 +25,20 @@ public class SecurityConfig {
             // We disable CSRF because JWTs are immune to traditional CSRF attacks
             .csrf(csrf -> csrf.disable())
             
-         // Define exactly who is allowed to visit which URLs
+            // Define exactly who is allowed to visit which URLs
             .authorizeHttpRequests(auth -> auth
                 
                 // THE PUBLIC LOBBY
                 .requestMatchers("/api/auth/**").permitAll()
                 .requestMatchers("/api/games/**").permitAll()
-                .requestMatchers("/error").permitAll() // <--- ADD THIS EXACT LINE
-                .requestMatchers("/api/auth/password/forgot").permitAll() 
-                .requestMatchers("/api/auth/password/reset").permitAll() 
-             // THE PUBLIC LOBBY
-                .requestMatchers(org.springframework.http.HttpMethod.GET, "/api/reviews/game/**").permitAll() 
+                .requestMatchers("/error").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/reviews/game/**").permitAll() 
                 
-                // THE SECURED VAULT (Requires the Bearer Token)
-                .requestMatchers("/api/reviews/**").authenticated()
-                // ---------------------------
                 // THE SECURED VAULT (Requires the Bearer Token)
                 .requestMatchers("/api/reviews/**").authenticated()
                 .requestMatchers("/api/users/**").authenticated()
                 .requestMatchers("/api/reports/**").authenticated()
-                .requestMatchers("/v3/api-docs/**", "/swagger-ui/**", "/swagger-ui.html").permitAll()
+                
                 // Lock down absolutely everything else by default
                 .anyRequest().authenticated()
             )
