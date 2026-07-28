@@ -40,7 +40,7 @@ public class JwtService {
 
         // 2. Pack the Ban Status to instantly trigger the frontend UI locks
         extraClaims.put("isBanned", user.getIsBanned() != null ? user.getIsBanned() : false);
-        
+        	
         // 3. Pack the Ban Expiration Time for the modal text
         if (user.getBanExpiresAt() != null) {
             extraClaims.put("banExpiration", user.getBanExpiresAt().toString());

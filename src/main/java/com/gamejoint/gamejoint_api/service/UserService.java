@@ -3,6 +3,8 @@ package com.gamejoint.gamejoint_api.service;
 import com.gamejoint.gamejoint_api.dto.AccountDeleteRequest;
 import com.gamejoint.gamejoint_api.dto.EmailChangeRequest;
 import com.gamejoint.gamejoint_api.dto.PasswordChangeRequest;
+import com.gamejoint.gamejoint_api.dto.PublicProfileResponse;
+import com.gamejoint.gamejoint_api.dto.ReviewResponse;
 import com.gamejoint.gamejoint_api.dto.UserProfileResponse;
 import com.gamejoint.gamejoint_api.exception.DuplicateResourceException;
 import com.gamejoint.gamejoint_api.exception.InvalidCredentialsException;
@@ -12,12 +14,14 @@ import com.gamejoint.gamejoint_api.repository.UserRepository;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
+import org.springframework.scheduling.annotation.Scheduled;
 import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.security.SecureRandom;
 import java.time.LocalDateTime;
+import java.util.List;
 
 @Service
 @RequiredArgsConstructor
@@ -43,14 +47,42 @@ public class UserService {
         response.setUsername(user.getUsername());
         response.setEmail(user.getEmail());
         response.setDob(user.getDob());
+        response.setIsVerified(user.getIsVerified());
+        response.setIsBanned(user.getIsBanned());
+        response.setBanExpiresAt(user.getBanExpiresAt());
+        response.setDeletionDate(user.getDeletionScheduledAt());
+        
+        // --- ADD THIS LINE ---
         response.setCreatedAt(user.getCreatedAt());
+        
+        if (user.getRole() != null) {
+            response.setRoleName(user.getRole().getRoleName());
+        }
+
+        return response;
+    }
+ // ==========================================
+    // PUBLIC PROFILE (Safe Lookup)
+    // ==========================================
+    @Transactional(readOnly = true)
+    public PublicProfileResponse getPublicProfile(String username) {
+        User user = userRepository.findByUsername(username)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+
+        PublicProfileResponse response = new PublicProfileResponse();
+        response.setId(user.getId());
+        response.setUsername(user.getUsername());
+        response.setCreatedAt(user.getCreatedAt());
+        response.setIsBanned(user.getIsBanned());
+        if (user.getRole() != null) response.setRoleName(user.getRole().getRoleName());
         
         return response;
     }
-
     // ==========================================
     // OTP GENERATION (Settings Guard)
     // ==========================================
+
+    
     @Transactional
     public void requestSettingsOtp(Long userId) {
         // 1. Prevent email spam!
@@ -112,14 +144,53 @@ public class UserService {
         clearOtp(user);
     }
 
+ // ==========================================
+    // ACCOUNT DELETION LOGIC
+    // ==========================================
+
     @Transactional
     public void deleteAccount(Long userId, AccountDeleteRequest request) {
         User user = userRepository.findById(userId).orElseThrow();
         validateSettingsOtp(user, request.getOtpCode());
 
-        // Deletes the user entirely. 
-        // (Ensure your MariaDB Foreign Keys are set to ON DELETE CASCADE for reviews/reports!)
-        userRepository.delete(user); 
+        // 1. Instead of deleting immediately, set the timer for 7 days from now
+        user.setDeletionScheduledAt(LocalDateTime.now().plusDays(7));
+        
+        // 2. Increment token version to immediately log them out of all devices!
+        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+        clearOtp(user);
+        
+        userRepository.save(user);
+    }
+
+    @Transactional
+    public void cancelAccountDeletion(Long userId) {
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ResourceNotFoundException("User not found"));
+                
+        // Instantly clears the scheduled deletion
+        user.setDeletionScheduledAt(null);
+        userRepository.save(user);
+    }
+
+    // ==========================================
+    // AUTOMATED DATABASE SWEEPER
+    // ==========================================
+
+    // Cron format: Seconds Minutes Hours DayOfMonth Month DayOfWeek
+    // "0 59 23 * * ?" = Runs at exactly 23:59:00 every single day
+    @Scheduled(cron = "0 59 23 * * ?") 
+    @Transactional
+    public void processScheduledDeletions() {
+        // Find everyone whose 7 days are up
+        List<User> usersToDelete = userRepository.findByDeletionScheduledAtBefore(LocalDateTime.now());
+        
+        if (!usersToDelete.isEmpty()) {
+            // Physically deletes the users. 
+            // Make sure your MariaDB Foreign Keys have ON DELETE CASCADE for their reviews/reports!
+            userRepository.deleteAll(usersToDelete);
+            System.out.println("Automated Sweep: Permanently deleted " + usersToDelete.size() + " accounts.");
+        }
     }
 
     // ==========================================

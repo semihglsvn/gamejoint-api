@@ -3,6 +3,7 @@ package com.gamejoint.gamejoint_api.controller;
 import com.gamejoint.gamejoint_api.dto.AccountDeleteRequest;
 import com.gamejoint.gamejoint_api.dto.EmailChangeRequest;
 import com.gamejoint.gamejoint_api.dto.PasswordChangeRequest;
+import com.gamejoint.gamejoint_api.dto.PublicProfileResponse;
 import com.gamejoint.gamejoint_api.dto.UserProfileResponse;
 import com.gamejoint.gamejoint_api.service.UserService;
 import lombok.RequiredArgsConstructor;
@@ -23,10 +24,6 @@ public class UserController {
         return ResponseEntity.ok(userService.getProfile(userId));
     }
 
-    /**
-     * Endpoint: POST /api/users/settings/otp
-     * Generates a 6-digit code and emails it to the currently logged-in user.
-     */
     @PostMapping("/settings/otp")
     public ResponseEntity<Map<String, String>> requestSettingsOtp(@RequestAttribute("userId") Long userId) {
         userService.requestSettingsOtp(userId);
@@ -54,6 +51,18 @@ public class UserController {
             @RequestAttribute("userId") Long userId,
             @RequestBody AccountDeleteRequest request) {
         userService.deleteAccount(userId, request);
-        return ResponseEntity.ok(Map.of("message", "Account successfully deleted."));
+        return ResponseEntity.ok(Map.of("message", "Account scheduled for deletion in 7 days. You have been logged out."));
+    }
+    
+    // --- FIXED: Changed to accept String username ---
+    @GetMapping("/{username}/public")
+    public ResponseEntity<PublicProfileResponse> getPublicProfile(@PathVariable String username) {
+        return ResponseEntity.ok(userService.getPublicProfile(username));
+    }
+
+    @PostMapping("/cancel-deletion")
+    public ResponseEntity<Map<String, String>> cancelDeletion(@RequestAttribute("userId") Long userId) {
+        userService.cancelAccountDeletion(userId);
+        return ResponseEntity.ok(Map.of("message", "Account deletion successfully cancelled. Welcome back!"));
     }
 }

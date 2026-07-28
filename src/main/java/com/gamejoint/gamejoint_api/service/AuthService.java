@@ -15,6 +15,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
+import java.time.LocalDateTime;
 import java.util.Map;
 
 @Service
@@ -63,30 +64,41 @@ public class AuthService {
 
 		accountRecoveryService.resendVerificationEmail(user.getEmail()); // The call is now here!
 	}
-
 	public String login(UserLoginRequest request) {
-		String ip = getClientIp(httpRequest);
-		rateLimitService.verifyLoginAttempt(ip);
+        String ip = getClientIp(httpRequest);
+        rateLimitService.verifyLoginAttempt(ip);
 
-		verifyTurnstile(request.getCfTurnstileResponse());
+        verifyTurnstile(request.getCfTurnstileResponse());
 
-		User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
-				.orElseThrow(() -> new InvalidCredentialsException("No account found with that username or email."));
+        User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
+                .orElseThrow(() -> new InvalidCredentialsException("No account found with that username or email."));
 
-		if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
-			throw new InvalidCredentialsException("Invalid password.");
-		}
+        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+            throw new InvalidCredentialsException("Invalid password.");
+        }
 
-		if (user.getIsVerified() != null && !user.getIsVerified()) {
-			throw new AccountRestrictedException("Your account is not verified. Please check your email.");
-		}
+        if (user.getIsVerified() != null && !user.getIsVerified()) {
+            throw new AccountRestrictedException("Your account is not verified. Please check your email.");
+        }
 
-		// --- FIXED: Use the new helper method to bypass the Cloudflare Tunnel mask ---
-		String realIpAddress = getClientIp(httpRequest);
-		loginNotificationService.sendNewLoginAlert(user.getEmail(), realIpAddress, user.getUsername());
+        // --- FIXED: BAN EXPIRATION CHECK ---
+        if (Boolean.TRUE.equals(user.getIsBanned())) {
+            if (user.getBanExpiresAt() != null && user.getBanExpiresAt().isBefore(LocalDateTime.now())) {
+                // Ban expired! Lift it before generating the token.
+                user.setIsBanned(false);
+                user.setBanExpiresAt(null);
+                userRepository.save(user); 
+            } else {
+                throw new AccountRestrictedException("Your account is currently suspended until " + 
+                    (user.getBanExpiresAt() != null ? user.getBanExpiresAt().toString() : "forever."));
+            }
+        }
 
-		return jwtService.generateToken(user);
-	}
+        String realIpAddress = getClientIp(httpRequest);
+        loginNotificationService.sendNewLoginAlert(user.getEmail(), realIpAddress, user.getUsername());
+
+        return jwtService.generateToken(user);
+    }
 
 	// ==========================================
 	// HELPER: GET REAL IP BEHIND REVERSE PROXY

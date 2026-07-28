@@ -45,7 +45,6 @@ public class User {
     @Column(name = "remember_token_hash")
     private String rememberTokenHash;
     
-    // --- WEB TOKENS (Preserved) ---
     @Column(name = "reset_token_hash")
     private String resetTokenHash;
     
@@ -58,7 +57,6 @@ public class User {
     @Column(name = "verification_token")
     private String verificationToken;
 
-    // --- NEW MOBILE OTP TOKENS ---
     @Column(name = "otp_code")
     private String otpCode;
 
@@ -71,6 +69,9 @@ public class User {
 
     @Column(name = "token_version", nullable = false)
     private Integer tokenVersion = 0;
+    
+    @Column(name = "deletion_scheduled_at")
+    private LocalDateTime deletionScheduledAt;
     
     @PrePersist
     protected void onCreate() {

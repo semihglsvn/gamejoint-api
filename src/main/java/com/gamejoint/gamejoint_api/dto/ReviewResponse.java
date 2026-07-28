@@ -8,9 +8,10 @@ public class ReviewResponse {
     
     private Long id;
     private String authorUsername; 
-    
-    // ADD THIS: So the mobile app knows if they get a Critic Badge
+        
     private String authorRole; 
+    private Long gameId;
+    private String gameTitle;
     
     private Integer score;
     private String comment;

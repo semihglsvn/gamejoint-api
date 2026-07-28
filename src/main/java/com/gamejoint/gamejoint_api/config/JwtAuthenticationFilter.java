@@ -3,6 +3,8 @@ package com.gamejoint.gamejoint_api.config;
 import com.gamejoint.gamejoint_api.model.User;
 import com.gamejoint.gamejoint_api.repository.UserRepository;
 import com.gamejoint.gamejoint_api.service.JwtService;
+import io.jsonwebtoken.ExpiredJwtException; 
+import io.jsonwebtoken.JwtException; 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
 import jakarta.servlet.http.HttpServletRequest;
@@ -16,6 +18,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.web.filter.OncePerRequestFilter;
 
 import java.io.IOException;
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 
 @Component
@@ -40,7 +43,17 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
         }
 
         final String jwt = authHeader.substring(7);
-        final String username = jwtService.extractUsername(jwt);
+        final String username;
+
+        try {
+            username = jwtService.extractUsername(jwt);
+        } catch (ExpiredJwtException e) {
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session expired. Please log in again.");
+            return;
+        } catch (JwtException e) {
+            response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Invalid authentication token.");
+            return;
+        }
 
         if (username != null && SecurityContextHolder.getContext().getAuthentication() == null) {
             
@@ -49,25 +62,41 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (user != null && jwtService.isTokenValid(jwt, user)) {
                 
                 // ==========================================
-                // NEW: TOKEN REVOCATION (SESSION KILL SWITCH)
+                // 1. DYNAMIC BAN CHECK (Server Time)
+                // ==========================================
+                if (Boolean.TRUE.equals(user.getIsBanned())) {
+                    if (user.getBanExpiresAt() != null && user.getBanExpiresAt().isBefore(LocalDateTime.now())) {
+                        // Ban has expired! Lift it and kill the current "banned" session.
+                        user.setIsBanned(false);
+                        user.setBanExpiresAt(null);
+                        user.setTokenVersion((user.getTokenVersion() == null ? 0 : user.getTokenVersion()) + 1);
+                        userRepository.save(user);
+                        
+                        response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Ban expired. Please log in to refresh your session.");
+                        return;
+                    } else {
+                        // Still banned. Block the request.
+                        response.sendError(HttpServletResponse.SC_FORBIDDEN, "Your account is currently suspended.");
+                        return;
+                    }
+                }
+
+                // ==========================================
+                // 2. TOKEN REVOCATION (SESSION KILL SWITCH)
                 // ==========================================
                 Integer jwtTokenVersion = jwtService.extractTokenVersion(jwt);
-                
-                // If the JWT version doesn't match the database, the session was revoked!
                 if (jwtTokenVersion == null || !jwtTokenVersion.equals(user.getTokenVersion())) {
                     response.sendError(HttpServletResponse.SC_UNAUTHORIZED, "Session expired or revoked. Please log in again.");
                     return;
                 }
 
                 // ==========================================
-                // THE CRITICAL HANDOFF TO THE CONTROLLER
+                // 3. HANDOFF TO CONTROLLER
                 // ==========================================
                 request.setAttribute("userId", user.getId());
 
                 UsernamePasswordAuthenticationToken authToken = new UsernamePasswordAuthenticationToken(
-                        user,
-                        null,
-                        new ArrayList<>() 
+                        user, null, new ArrayList<>() 
                 );
                 
                 authToken.setDetails(new WebAuthenticationDetailsSource().buildDetails(request));

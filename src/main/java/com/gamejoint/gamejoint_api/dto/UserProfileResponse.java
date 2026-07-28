@@ -16,5 +16,5 @@ public class UserProfileResponse {
     private String roleName; 
     private Boolean isBanned;
     private LocalDateTime banExpiresAt;
-
+    private LocalDateTime deletionDate;
 }

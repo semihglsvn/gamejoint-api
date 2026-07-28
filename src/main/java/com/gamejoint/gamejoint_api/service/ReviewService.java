@@ -15,6 +15,9 @@ import com.gamejoint.gamejoint_api.repository.UserRepository;
 import lombok.RequiredArgsConstructor;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
+
+import java.util.List;
+
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 
@@ -78,19 +81,16 @@ public class ReviewService {
         // it in your Review.java entity class earlier.
         
         reviewRepository.save(review);
+        
+     // Note: The Game's average score is automatically updated by a MariaDB Trigger.
     }
 
-    /**
-     * Fetches approved reviews for a specific game, filtered by user role.
-     */
     @Transactional(readOnly = true)
     public Page<ReviewResponse> getReviewsForGame(Long gameId, Long roleId, org.springframework.data.domain.Pageable pageable) {
         
-        // Ensure the game actually exists first
         Game game = gameRepository.findById(gameId)
                 .orElseThrow(() -> new ResourceNotFoundException("Game not found"));
 
-        // Fetch only APPROVED reviews for this specific game and role
         Page<Review> reviews = reviewRepository.findByGameIdAndUserRoleIdAndStatus(
                 game.getId(), 
                 roleId, 
@@ -98,10 +98,10 @@ public class ReviewService {
                 pageable
         );
 
-        // Map the database Entities to the lightweight DTOs
         return reviews.map(review -> {
             ReviewResponse response = new ReviewResponse();
             response.setId(review.getId());
+            // REMOVED authorId mapping
             response.setAuthorUsername(review.getUser().getUsername());
             response.setAuthorRole(review.getUser().getRole().getRoleName());
             response.setScore(review.getScore());
@@ -110,6 +110,38 @@ public class ReviewService {
             response.setStatus(review.getStatus().name());
             return response;
         });
+    }
+
+    /**
+     * Fetches approved reviews written by a specific user (For Public Profiles).
+     */
+    @Transactional(readOnly = true)
+    public List<ReviewResponse> getUserReviews(String username) { // CHANGED TO String
+        
+        // 1. Fetch reviews using the new Username repository method
+        List<Review> reviews = reviewRepository.findByUserUsernameAndStatusOrderByCreatedAtDesc(
+                username, 
+                Review.ReviewStatus.approved
+        );
+
+        return reviews.stream().map(review -> {
+            ReviewResponse response = new ReviewResponse();
+            response.setId(review.getId());
+            
+            response.setGameId(review.getGame().getId());
+            response.setGameTitle(review.getGame().getTitle());
+            
+            // REMOVED authorId mapping
+            response.setAuthorUsername(review.getUser().getUsername());
+            response.setAuthorRole(review.getUser().getRole().getRoleName());
+            
+            response.setScore(review.getScore());
+            response.setComment(review.getComment());
+            response.setCreatedAt(review.getCreatedAt());
+            response.setStatus(review.getStatus().name());
+            
+            return response;
+        }).toList();
     }
     /**
      * Updates an existing review, proving ownership first.
@@ -167,4 +199,5 @@ public void deleteReview(Long userId, Long reviewId) {
 
     reviewRepository.delete(review);
 }
+
 }

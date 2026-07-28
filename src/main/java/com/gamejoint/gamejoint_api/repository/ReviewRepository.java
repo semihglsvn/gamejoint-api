@@ -6,18 +6,20 @@ import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.stereotype.Repository;
 
+import java.util.List;
+
 @Repository
 public interface ReviewRepository extends JpaRepository<Review, Long> {
 
-    // Keep your original method
     Page<Review> findByGameId(Long gameId, Pageable pageable);
 
-    // --- ADD THIS NEW METHOD ---
-    // Spring automatically writes the SQL to filter by Game, Role ID, and Status
     Page<Review> findByGameIdAndUserRoleIdAndStatus(
             Long gameId, 
             Long roleId, 
             Review.ReviewStatus status, 
             Pageable pageable
     );
+
+    // CHANGED: Now searches by the User's Username!
+    List<Review> findByUserUsernameAndStatusOrderByCreatedAtDesc(String username, Review.ReviewStatus status);
 }
