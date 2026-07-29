@@ -38,32 +38,39 @@ public class AuthService {
 	private String mobileApiSecret; // Add this to your application.properties!
 
 	@Transactional
-	public void register(UserRegistrationRequest request) {
-		String ip = getClientIp(httpRequest);
-		rateLimitService.verifyRegistrationAttempt(ip);
-		verifyTurnstile(request.getCfTurnstileResponse());
+    public void register(UserRegistrationRequest request) {
+        String ip = getClientIp(httpRequest);
+        rateLimitService.verifyRegistrationAttempt(ip);
 
-		if (userRepository.existsByUsername(request.getUsername())
-				|| userRepository.existsByEmail(request.getEmail())) {
-			throw new UserAlreadyExistsException("Username or Email is already taken.");
-		}
+        try {
+            verifyTurnstile(request.getCfTurnstileResponse());
 
-		User user = new User();
-		user.setUsername(request.getUsername());
-		user.setEmail(request.getEmail());
-		user.setDob(request.getDob());
+            if (userRepository.existsByUsername(request.getUsername())
+                    || userRepository.existsByEmail(request.getEmail())) {
+                throw new UserAlreadyExistsException("Username or Email is already taken.");
+            }
 
-		user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+            User user = new User();
+            user.setUsername(request.getUsername());
+            user.setEmail(request.getEmail());
+            user.setDob(request.getDob());
+            user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
 
-		user.setIsVerified(false);
-		user.setIsBanned(false);
-		user.setFalseReportStrikes(0);
-		user.setShadowbannedReports(false);
+            user.setIsVerified(false);
+            user.setIsBanned(false);
+            user.setFalseReportStrikes(0);
+            user.setShadowbannedReports(false);
 
-		userRepository.save(user);
+            userRepository.save(user);
 
-		accountRecoveryService.resendVerificationEmail(user.getEmail()); // The call is now here!
-	}
+            accountRecoveryService.resendVerificationEmail(user.getEmail());
+            
+        } catch (Exception e) {
+            // Refund the rate-limit token so failed attempts or server errors don't lock out the user
+            rateLimitService.refundRegistrationAttempt(ip);
+            throw e; // Re-throw the exception so the global handler still returns the proper error response
+        }
+    }
 	public String login(UserLoginRequest request) {
         String ip = getClientIp(httpRequest);
         rateLimitService.verifyLoginAttempt(ip);
