@@ -7,6 +7,7 @@ import io.jsonwebtoken.ExpiredJwtException;
 import io.jsonwebtoken.JwtException; 
 import jakarta.servlet.FilterChain;
 import jakarta.servlet.ServletException;
+import jakarta.servlet.http.Cookie;
 import jakarta.servlet.http.HttpServletRequest;
 import jakarta.servlet.http.HttpServletResponse;
 import lombok.RequiredArgsConstructor;
@@ -35,14 +36,31 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             @NonNull FilterChain filterChain
     ) throws ServletException, IOException {
 
+        String jwt = null;
         final String authHeader = request.getHeader("Authorization");
 
-        if (authHeader == null || !authHeader.startsWith("Bearer ")) {
+        // ==========================================
+        // 1. EXTRACT JWT (MOBILE OR WEB)
+        // ==========================================
+        if (authHeader != null && authHeader.startsWith("Bearer ")) {
+            // Mobile App: Extract from Header
+            jwt = authHeader.substring(7);
+        } else if (request.getCookies() != null) {
+            // Web App: Extract from HttpOnly Cookie
+            for (Cookie cookie : request.getCookies()) {
+                if ("jwt".equals(cookie.getName())) {
+                    jwt = cookie.getValue();
+                    break;
+                }
+            }
+        }
+
+        // If no token is found, move along (public endpoints will allow it, secured will block it)
+        if (jwt == null) {
             filterChain.doFilter(request, response);
             return;
         }
 
-        final String jwt = authHeader.substring(7);
         final String username;
 
         try {
@@ -62,7 +80,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             if (user != null && jwtService.isTokenValid(jwt, user)) {
                 
                 // ==========================================
-                // 1. DYNAMIC BAN CHECK (Server Time)
+                // 2. DYNAMIC BAN CHECK (Server Time)
                 // ==========================================
                 if (Boolean.TRUE.equals(user.getIsBanned())) {
                     if (user.getBanExpiresAt() != null && user.getBanExpiresAt().isBefore(LocalDateTime.now())) {
@@ -82,7 +100,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
 
                 // ==========================================
-                // 2. TOKEN REVOCATION (SESSION KILL SWITCH)
+                // 3. TOKEN REVOCATION (SESSION KILL SWITCH)
                 // ==========================================
                 Integer jwtTokenVersion = jwtService.extractTokenVersion(jwt);
                 if (jwtTokenVersion == null || !jwtTokenVersion.equals(user.getTokenVersion())) {
@@ -91,7 +109,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
 
                 // ==========================================
-                // 3. HANDOFF TO CONTROLLER
+                // 4. HANDOFF TO CONTROLLER
                 // ==========================================
                 request.setAttribute("userId", user.getId());
 

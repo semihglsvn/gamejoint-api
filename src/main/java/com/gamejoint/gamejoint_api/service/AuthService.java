@@ -1,12 +1,18 @@
 package com.gamejoint.gamejoint_api.service;
 
-import com.gamejoint.gamejoint_api.dto.UserLoginRequest;
-import com.gamejoint.gamejoint_api.dto.UserRegistrationRequest;
+import com.gamejoint.gamejoint_api.dto.*;
 import com.gamejoint.gamejoint_api.exception.AccountRestrictedException;
+import com.gamejoint.gamejoint_api.exception.BadRequestException;
 import com.gamejoint.gamejoint_api.exception.InvalidCredentialsException;
 import com.gamejoint.gamejoint_api.exception.UserAlreadyExistsException;
+import com.gamejoint.gamejoint_api.model.LinkedAccount;
 import com.gamejoint.gamejoint_api.model.User;
+import com.gamejoint.gamejoint_api.repository.LinkedAccountRepository;
 import com.gamejoint.gamejoint_api.repository.UserRepository;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
 import jakarta.servlet.http.HttpServletRequest;
 import lombok.RequiredArgsConstructor;
 import org.springframework.beans.factory.annotation.Value;
@@ -16,28 +22,41 @@ import org.springframework.transaction.annotation.Transactional;
 import org.springframework.web.client.RestTemplate;
 
 import java.time.LocalDateTime;
+import java.util.Collections;
 import java.util.Map;
+import java.util.Optional;
 
 @Service
 @RequiredArgsConstructor
 public class AuthService {
 
-	private final UserRepository userRepository;
-	private final PasswordEncoder passwordEncoder;
-	private final JwtService jwtService;
-	private final RestTemplate restTemplate = new RestTemplate();
-	private final AccountRecoveryService accountRecoveryService;
-	private final LoginNotificationService loginNotificationService;
-	// Inject the HttpServletRequest to check for headers
-	private final HttpServletRequest httpRequest;
-	private final RateLimitingService rateLimitService; // <--- INJECT IT
-	@Value("${cloudflare.turnstile.secret}")
-	private String turnstileSecret;
+    private final UserRepository userRepository;
+    private final LinkedAccountRepository linkedAccountRepository;
+    private final PasswordEncoder passwordEncoder;
+    private final JwtService jwtService;
+    private final RestTemplate restTemplate = new RestTemplate();
+    private final AccountRecoveryService accountRecoveryService;
+    private final LoginNotificationService loginNotificationService;
+    private final HttpServletRequest httpRequest;
+    private final RateLimitingService rateLimitService; 
 
-	@Value("${mobile.api.secret}")
-	private String mobileApiSecret; // Add this to your application.properties!
+    @Value("${cloudflare.turnstile.secret}")
+    private String turnstileSecret;
 
-	@Transactional
+    @Value("${mobile.api.secret}")
+    private String mobileApiSecret; 
+
+    @Value("${google.client.id}")
+    private String googleClientId;
+
+    @Value("${security.password.pepper}")
+    private String pepper;
+
+    // ==========================================
+    // STANDARD REGISTRATION & LOGIN
+    // ==========================================
+
+    @Transactional
     public void register(UserRegistrationRequest request) {
         String ip = getClientIp(httpRequest);
         rateLimitService.verifyRegistrationAttempt(ip);
@@ -54,7 +73,9 @@ public class AuthService {
             user.setUsername(request.getUsername());
             user.setEmail(request.getEmail());
             user.setDob(request.getDob());
-            user.setPasswordHash(passwordEncoder.encode(request.getPassword()));
+            
+            // --- PEPPER APPLIED HERE ---
+            user.setPasswordHash(passwordEncoder.encode(request.getPassword() + pepper));
 
             user.setIsVerified(false);
             user.setIsBanned(false);
@@ -66,12 +87,12 @@ public class AuthService {
             accountRecoveryService.resendVerificationEmail(user.getEmail());
             
         } catch (Exception e) {
-            // Refund the rate-limit token so failed attempts or server errors don't lock out the user
             rateLimitService.refundRegistrationAttempt(ip);
-            throw e; // Re-throw the exception so the global handler still returns the proper error response
+            throw e; 
         }
     }
-	public String login(UserLoginRequest request) {
+
+    public String login(UserLoginRequest request) {
         String ip = getClientIp(httpRequest);
         rateLimitService.verifyLoginAttempt(ip);
 
@@ -80,18 +101,156 @@ public class AuthService {
         User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
                 .orElseThrow(() -> new InvalidCredentialsException("No account found with that username or email."));
 
-        if (!passwordEncoder.matches(request.getPassword(), user.getPasswordHash())) {
+        // --- PEPPER APPLIED HERE ---
+        if (user.getPasswordHash() == null || !passwordEncoder.matches(request.getPassword() + pepper, user.getPasswordHash())) {
             throw new InvalidCredentialsException("Invalid password.");
         }
 
+        validateUserStatus(user);
+
+        loginNotificationService.sendNewLoginAlert(user.getEmail(), ip, user.getUsername());
+
+        return jwtService.generateToken(user);
+    }
+
+    // ==========================================
+    // OAUTH FLOWS (UNIVERSAL)
+    // ==========================================
+
+    @Transactional
+    public OAuthAuthResponse oauthLogin(OAuthLoginRequest request) {
+        String ip = getClientIp(httpRequest);
+        rateLimitService.verifyLoginAttempt(ip);
+        verifyTurnstile(request.getCfTurnstileResponse());
+
+        // 1. Verify the token with the external provider
+        ProviderUserInfo userInfo = verifyProviderToken(request.getProvider(), request.getProviderToken());
+
+        // 2. Check if this specific provider account is already linked
+        Optional<LinkedAccount> linkedAccountOpt = linkedAccountRepository.findByProviderAndProviderId(request.getProvider(), userInfo.providerId());
+        
+        if (linkedAccountOpt.isPresent()) {
+            User user = linkedAccountOpt.get().getUser();
+            validateUserStatus(user);
+            loginNotificationService.sendNewLoginAlert(user.getEmail(), ip, user.getUsername());
+            
+            return OAuthAuthResponse.builder()
+                    .isNewUser(false)
+                    .jwtToken(jwtService.generateToken(user))
+                    .build();
+        }
+
+        // 3. Auto-Link: If no LinkedAccount exists, but the verified email matches an existing user
+        Optional<User> userOpt = userRepository.findByEmail(userInfo.email());
+        if (userOpt.isPresent()) {
+            User user = userOpt.get();
+            validateUserStatus(user);
+            
+            LinkedAccount newLink = new LinkedAccount(user, request.getProvider(), userInfo.providerId());
+            linkedAccountRepository.save(newLink);
+            
+            loginNotificationService.sendNewLoginAlert(user.getEmail(), ip, user.getUsername());
+            
+            return OAuthAuthResponse.builder()
+                    .isNewUser(false)
+                    .jwtToken(jwtService.generateToken(user))
+                    .build();
+        }
+
+        // 4. Brand New User: Return payload instructing frontend to ask for Username & DOB
+        return OAuthAuthResponse.builder()
+                .isNewUser(true)
+                .email(userInfo.email())
+                .jwtToken(null)
+                .build();
+    }
+
+    @Transactional
+    public String completeOAuthRegistration(OAuthRegistrationCompleteRequest request) {
+        String ip = getClientIp(httpRequest);
+        rateLimitService.verifyRegistrationAttempt(ip);
+        
+        try {
+            verifyTurnstile(request.getCfTurnstileResponse());
+
+            // 1. Re-verify the token securely on the backend
+            ProviderUserInfo userInfo = verifyProviderToken(request.getProvider(), request.getProviderToken());
+
+            // 2. Validate uniqueness
+            if (userRepository.existsByUsername(request.getUsername())) {
+                throw new UserAlreadyExistsException("Username is already taken.");
+            }
+            if (userRepository.existsByEmail(userInfo.email())) {
+                throw new UserAlreadyExistsException("Email is already registered. Please sign in instead.");
+            }
+
+            // 3. Create the OAuth User
+            User user = new User();
+            user.setUsername(request.getUsername());
+            user.setEmail(userInfo.email());
+            user.setDob(request.getDob());
+            user.setPasswordHash(null); // Explicitly null for OAuth accounts
+            user.setIsVerified(true);   // Automatically verified because the provider verified it
+            user.setIsBanned(false);
+            user.setFalseReportStrikes(0);
+            user.setShadowbannedReports(false);
+
+            user = userRepository.save(user);
+
+            // 4. Link the provider
+            LinkedAccount linkedAccount = new LinkedAccount(user, request.getProvider(), userInfo.providerId());
+            linkedAccountRepository.save(linkedAccount);
+
+            return jwtService.generateToken(user);
+            
+        } catch (Exception e) {
+            rateLimitService.refundRegistrationAttempt(ip);
+            throw e;
+        }
+    }
+
+    // ==========================================
+    // HELPER: EXTERNAL TOKEN VERIFICATION
+    // ==========================================
+    
+    private ProviderUserInfo verifyProviderToken(String provider, String token) {
+        if ("GOOGLE".equalsIgnoreCase(provider)) {
+            try {
+                GoogleIdTokenVerifier verifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), GsonFactory.getDefaultInstance())
+                        .setAudience(Collections.singletonList(googleClientId))
+                        .build();
+
+                GoogleIdToken idToken = verifier.verify(token);
+                if (idToken != null) {
+                    GoogleIdToken.Payload payload = idToken.getPayload();
+                    return new ProviderUserInfo(payload.getEmail(), payload.getSubject());
+                } else {
+                    throw new InvalidCredentialsException("Invalid or expired Google token.");
+                }
+            } catch (Exception e) {
+                throw new InvalidCredentialsException("Failed to verify Google token securely.");
+            }
+        }
+        
+        // When you add Discord/Steam later, just add an else-if block here!
+        throw new BadRequestException("Unsupported OAuth provider: " + provider);
+    }
+
+    // A lightweight internal record to securely pass provider data around
+    private record ProviderUserInfo(String email, String providerId) {}
+
+    // ==========================================
+    // HELPER: USER STATUS VALIDATION
+    // ==========================================
+    
+    private void validateUserStatus(User user) {
         if (user.getIsVerified() != null && !user.getIsVerified()) {
             throw new AccountRestrictedException("Your account is not verified. Please check your email.");
         }
 
-        // --- FIXED: BAN EXPIRATION CHECK ---
         if (Boolean.TRUE.equals(user.getIsBanned())) {
             if (user.getBanExpiresAt() != null && user.getBanExpiresAt().isBefore(LocalDateTime.now())) {
-                // Ban expired! Lift it before generating the token.
+                // Ban expired! Lift it.
                 user.setIsBanned(false);
                 user.setBanExpiresAt(null);
                 userRepository.save(user); 
@@ -100,60 +259,45 @@ public class AuthService {
                     (user.getBanExpiresAt() != null ? user.getBanExpiresAt().toString() : "forever."));
             }
         }
-
-        String realIpAddress = getClientIp(httpRequest);
-        loginNotificationService.sendNewLoginAlert(user.getEmail(), realIpAddress, user.getUsername());
-
-        return jwtService.generateToken(user);
     }
 
-	// ==========================================
-	// HELPER: GET REAL IP BEHIND REVERSE PROXY
-	// ==========================================
-	private String getClientIp(HttpServletRequest request) {
-		// 1. Cloudflare's specific header
-		String ip = request.getHeader("CF-Connecting-IP");
+    // ==========================================
+    // HELPER: GET REAL IP BEHIND REVERSE PROXY
+    // ==========================================
+    
+    private String getClientIp(HttpServletRequest request) {
+        String ip = request.getHeader("CF-Connecting-IP");
 
-		// 2. Standard proxy header (if Cloudflare is off but Nginx is on)
-		if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-			ip = request.getHeader("X-Forwarded-For");
-		}
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getHeader("X-Forwarded-For");
+        }
+        if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
+            ip = request.getRemoteAddr();
+        }
+        if (ip != null && ip.contains(",")) {
+            ip = ip.split(",")[0].trim();
+        }
+        return ip;
+    }
 
-		// 3. Fallback to the direct connection (Will be 127.0.0.1 if behind tunnel)
-		if (ip == null || ip.isEmpty() || "unknown".equalsIgnoreCase(ip)) {
-			ip = request.getRemoteAddr();
-		}
+    private void verifyTurnstile(String cfResponse) {
+        String clientSecretHeader = httpRequest.getHeader("X-Mobile-App-Secret");
+        if (clientSecretHeader != null && clientSecretHeader.equals(mobileApiSecret)) {
+            return; 
+        }
 
-		// X-Forwarded-For can return multiple IPs (client, proxy1, proxy2).
-		// The first one is always the true client.
-		if (ip != null && ip.contains(",")) {
-			ip = ip.split(",")[0].trim();
-		}
+        if (cfResponse == null || cfResponse.isBlank()) {
+            throw new InvalidCredentialsException("Security widget failed to load. Please try again.");
+        }
 
-		return ip;
-	}
+        String url = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
+        var request = Map.of("secret", turnstileSecret, "response", cfResponse);
 
-	private void verifyTurnstile(String cfResponse) {
-		// --- MOBILE APP BYPASS ---
-		String clientSecretHeader = httpRequest.getHeader("X-Mobile-App-Secret");
-		if (clientSecretHeader != null && clientSecretHeader.equals(mobileApiSecret)) {
-			return; // Skip Cloudflare entirely for authentic native app requests
-		}
+        @SuppressWarnings("unchecked")
+        Map<String, Object> body = restTemplate.postForObject(url, request, Map.class);
 
-		// --- STANDARD WEB VERIFICATION ---
-		if (cfResponse == null || cfResponse.isBlank()) {
-			throw new InvalidCredentialsException("Security widget failed to load. Please try again.");
-		}
-
-		String url = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
-
-		var request = Map.of("secret", turnstileSecret, "response", cfResponse);
-
-		@SuppressWarnings("unchecked")
-		Map<String, Object> body = restTemplate.postForObject(url, request, Map.class);
-
-		if (body == null || !Boolean.TRUE.equals(body.get("success"))) {
-			throw new InvalidCredentialsException("Cloudflare verification failed. Are you a bot?");
-		}
-	}
+        if (body == null || !Boolean.TRUE.equals(body.get("success"))) {
+            throw new InvalidCredentialsException("Cloudflare verification failed. Are you a bot?");
+        }
+    }
 }
