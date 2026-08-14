@@ -19,7 +19,7 @@ public class RateLimitingService {
     private final Map<String, Bucket> emailBuckets = new ConcurrentHashMap<>();
     private final Map<Long, Bucket> reviewBuckets = new ConcurrentHashMap<>();
     private final Map<Long, Bucket> reportBuckets = new ConcurrentHashMap<>();
-
+    private final Map<String, Bucket> passwordResetBuckets = new ConcurrentHashMap<>();
     // ==========================================
     // BUCKET CONFIGURATIONS
     // ==========================================
@@ -92,6 +92,20 @@ public class RateLimitingService {
             );
         }
     }
+    
+    private Bucket newPasswordResetBucket() {
+        Bandwidth limit = Bandwidth.builder()
+                .capacity(3)
+                .refillGreedy(3, Duration.ofHours(1))
+                .build();
+        return Bucket.builder().addLimit(limit).build();
+    }
+
+    // 3. Add the Verification Method:
+    public void verifyPasswordResetAttempt(String ip) {
+        Bucket bucket = passwordResetBuckets.computeIfAbsent(ip, k -> newPasswordResetBucket());
+        checkAndConsume(bucket, "password reset");
+    }
 
     // ==========================================
     // VERIFICATION & REFUND METHODS
@@ -113,7 +127,7 @@ public class RateLimitingService {
             bucket.addTokens(1); // Refund token if request fails due to server error or validation
         }
     }
-
+    
     public void verifyEmailTrigger(String ip) {
         Bucket bucket = emailBuckets.computeIfAbsent(ip, k -> newEmailBucket());
         checkAndConsume(bucket, "email");

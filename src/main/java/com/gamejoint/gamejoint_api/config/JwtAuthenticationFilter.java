@@ -21,6 +21,7 @@ import org.springframework.web.filter.OncePerRequestFilter;
 import java.io.IOException;
 import java.time.LocalDateTime;
 import java.util.ArrayList;
+import java.util.List;
 
 @Component
 @RequiredArgsConstructor
@@ -28,6 +29,28 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
 
     private final JwtService jwtService;
     private final UserRepository userRepository;
+
+    // ==========================================
+    // EXPLICIT ALLOWLIST (Strict Security)
+    // ==========================================
+    private static final List<String> PUBLIC_AUTH_ENDPOINTS = List.of(
+            "/api/auth/login",
+            "/api/auth/register",
+            "/api/auth/oauth/login",
+            "/api/auth/oauth/complete",
+            "/api/auth/verify",
+            "/api/auth/verify/resend",
+            "/api/auth/password/forgot",
+            "/api/auth/password/reset"
+    );
+
+    @Override
+    protected boolean shouldNotFilter(@NonNull HttpServletRequest request) throws ServletException {
+        String path = request.getRequestURI();
+        // Only bypass the JWT check for explicitly defined public endpoints.
+        // This guarantees that routes like /api/auth/me or /api/auth/logout ARE protected.
+        return PUBLIC_AUTH_ENDPOINTS.contains(path);
+    }
 
     @Override
     protected void doFilterInternal(
@@ -55,7 +78,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
             }
         }
 
-        // If no token is found, move along (public endpoints will allow it, secured will block it)
+        // If no token is found, move along (public endpoints allow it, secured block it later)
         if (jwt == null) {
             filterChain.doFilter(request, response);
             return;
@@ -109,7 +132,7 @@ public class JwtAuthenticationFilter extends OncePerRequestFilter {
                 }
 
                 // ==========================================
-                // 4. HANDOFF TO CONTROLLER
+                // 4. HANDOFF TO CONTROLLER 
                 // ==========================================
                 request.setAttribute("userId", user.getId());
 

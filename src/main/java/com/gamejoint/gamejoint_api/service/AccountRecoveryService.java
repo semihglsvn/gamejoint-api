@@ -69,11 +69,13 @@ public class AccountRecoveryService {
     @Transactional
     public void requestPasswordReset(String email) {
         String ip = getClientIp(httpRequest);
-        rateLimitService.verifyEmailTrigger(ip);
+        
+        rateLimitService.verifyPasswordResetAttempt(ip); 
 
         Optional<User> userOptional = userRepository.findByEmail(email);
         if (userOptional.isEmpty()) return; 
 
+        // ... rest of the method remains exactly the same
         User user = userOptional.get();
 
         String otp = generateOtp();

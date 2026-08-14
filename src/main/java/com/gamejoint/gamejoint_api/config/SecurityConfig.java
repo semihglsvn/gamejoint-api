@@ -43,6 +43,10 @@ public class SecurityConfig {
                 .requestMatchers("/error").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/reviews/game/**").permitAll() 
                 
+                // Explicitly allow public profiles and user review feeds
+                .requestMatchers(HttpMethod.GET, "/api/users/*/public").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/reviews/user/*").permitAll()
+                
                 // THE SECURED VAULT
                 .requestMatchers("/api/reviews/**").authenticated()
                 .requestMatchers("/api/users/**").authenticated()
@@ -69,8 +73,11 @@ public class SecurityConfig {
     public CorsConfigurationSource corsConfigurationSource() {
         CorsConfiguration configuration = new CorsConfiguration();
         
-        // Allow your local Next.js dev server
-        configuration.setAllowedOrigins(Arrays.asList("http://localhost:3000"));
+        configuration.setAllowedOrigins(Arrays.asList(
+            "http://localhost:3000", 
+            "https://game-joint.net",
+            "https://www.game-joint.net"
+        ));
         
         configuration.setAllowedMethods(Arrays.asList("GET", "POST", "PUT", "DELETE", "OPTIONS"));
         

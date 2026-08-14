@@ -62,7 +62,6 @@ public class AuthService {
         rateLimitService.verifyRegistrationAttempt(ip);
 
         try {
-            verifyTurnstile(request.getCfTurnstileResponse());
 
             if (userRepository.existsByUsername(request.getUsername())
                     || userRepository.existsByEmail(request.getEmail())) {
@@ -96,7 +95,6 @@ public class AuthService {
         String ip = getClientIp(httpRequest);
         rateLimitService.verifyLoginAttempt(ip);
 
-        verifyTurnstile(request.getCfTurnstileResponse());
 
         User user = userRepository.findByUsernameOrEmail(request.getUsernameOrEmail(), request.getUsernameOrEmail())
                 .orElseThrow(() -> new InvalidCredentialsException("No account found with that username or email."));
@@ -121,8 +119,6 @@ public class AuthService {
     public OAuthAuthResponse oauthLogin(OAuthLoginRequest request) {
         String ip = getClientIp(httpRequest);
         rateLimitService.verifyLoginAttempt(ip);
-        verifyTurnstile(request.getCfTurnstileResponse());
-
         // 1. Verify the token with the external provider
         ProviderUserInfo userInfo = verifyProviderToken(request.getProvider(), request.getProviderToken());
 
@@ -171,8 +167,6 @@ public class AuthService {
         rateLimitService.verifyRegistrationAttempt(ip);
         
         try {
-            verifyTurnstile(request.getCfTurnstileResponse());
-
             // 1. Re-verify the token securely on the backend
             ProviderUserInfo userInfo = verifyProviderToken(request.getProvider(), request.getProviderToken());
 

@@ -1,6 +1,7 @@
 package com.gamejoint.gamejoint_api.controller;
 
 import com.gamejoint.gamejoint_api.dto.*;
+import com.gamejoint.gamejoint_api.model.User;
 import com.gamejoint.gamejoint_api.service.AccountRecoveryService;
 import com.gamejoint.gamejoint_api.service.AuthService;
 import com.gamejoint.gamejoint_api.service.TurnstileService;
@@ -11,6 +12,8 @@ import org.springframework.http.HttpHeaders;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ResponseCookie;
 import org.springframework.http.ResponseEntity;
+import org.springframework.security.core.Authentication;
+import org.springframework.security.core.context.SecurityContextHolder;
 import org.springframework.web.bind.annotation.*;
 
 import java.util.Map;
@@ -147,36 +150,87 @@ public class AuthController {
                 .httpOnly(true)
                 .secure(true) 
                 .path("/")
-                .maxAge(7 * 24 * 60 * 60) 
+                .maxAge(365 * 24 * 60 * 60) 
                 .sameSite("Lax")
                 .build();
+    }
+    
+    @GetMapping("/me")
+    public ResponseEntity<?> getCurrentUser() {
+        Authentication auth = SecurityContextHolder.getContext().getAuthentication();
+        
+        // If the HttpOnly cookie is valid, the filter will have populated this context
+        if (auth != null && auth.getPrincipal() instanceof User user) {
+            return ResponseEntity.ok(Map.of(
+                "username", user.getUsername(),
+                "role", "USER" // Adjust this if you have a dynamic role mapping!
+            ));
+        }
+        
+        return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();
     }
  // ==========================================
     // ACCOUNT RECOVERY & VERIFICATION (OTP ONLY)
     // ==========================================
 
     @PostMapping("/verify/resend")
-    public ResponseEntity<Map<String, String>> resendVerification(@RequestBody Map<String, String> body) {
+    public ResponseEntity<Map<String, String>> resendVerification(
+            @RequestBody Map<String, String> body,
+            @RequestHeader(value = "X-Mobile-App-Secret", required = false) String mobileSecretHeader,
+            @RequestHeader(value = "X-Turnstile-Token", required = false) String turnstileToken) {
+        
+        if (!isMobileRequest(mobileSecretHeader) && !turnstileService.verifyToken(turnstileToken)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "CAPTCHA validation failed. Please try again."));
+        }
+
         String identifier = body.get("identifier"); 
         recoveryService.resendVerificationEmail(identifier);
         return ResponseEntity.ok(Map.of("message", "If that account exists and is unverified, a new code has been sent."));
     }
 
     @PostMapping("/verify")
-    public ResponseEntity<Map<String, String>> verifyAccount(@RequestBody OtpVerifyRequest request) {
+    public ResponseEntity<Map<String, String>> verifyAccount(
+            @RequestBody OtpVerifyRequest request,
+            @RequestHeader(value = "X-Mobile-App-Secret", required = false) String mobileSecretHeader,
+            @RequestHeader(value = "X-Turnstile-Token", required = false) String turnstileToken) {
+            
+        if (!isMobileRequest(mobileSecretHeader) && !turnstileService.verifyToken(turnstileToken)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "CAPTCHA validation failed. Please try again."));
+        }
+
         recoveryService.verifyAccount(request.getIdentifier(), request.getOtp());
         return ResponseEntity.ok(Map.of("message", "Account successfully verified."));
     }
 
     @PostMapping("/password/forgot")
-    public ResponseEntity<Map<String, String>> forgotPassword(@RequestBody Map<String, String> body) {
+    public ResponseEntity<Map<String, String>> forgotPassword(
+            @RequestBody Map<String, String> body,
+            @RequestHeader(value = "X-Mobile-App-Secret", required = false) String mobileSecretHeader,
+            @RequestHeader(value = "X-Turnstile-Token", required = false) String turnstileToken) {
+            
+        if (!isMobileRequest(mobileSecretHeader) && !turnstileService.verifyToken(turnstileToken)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "CAPTCHA validation failed. Please try again."));
+        }
+
         String email = body.get("email");
         recoveryService.requestPasswordReset(email);
         return ResponseEntity.ok(Map.of("message", "If an account with that email exists, a password reset code has been sent."));
     }
 
     @PostMapping("/password/reset")
-    public ResponseEntity<Map<String, String>> resetPassword(@RequestBody OtpPasswordResetRequest request) {
+    public ResponseEntity<Map<String, String>> resetPassword(
+            @RequestBody OtpPasswordResetRequest request,
+            @RequestHeader(value = "X-Mobile-App-Secret", required = false) String mobileSecretHeader,
+            @RequestHeader(value = "X-Turnstile-Token", required = false) String turnstileToken) {
+            
+        if (!isMobileRequest(mobileSecretHeader) && !turnstileService.verifyToken(turnstileToken)) {
+            return ResponseEntity.status(HttpStatus.FORBIDDEN)
+                    .body(Map.of("message", "CAPTCHA validation failed. Please try again."));
+        }
+
         recoveryService.executePasswordReset(request.getEmail(), request.getOtp(), request.getNewPassword());
         return ResponseEntity.ok(Map.of("message", "Password has been successfully reset. You may now log in."));
     }

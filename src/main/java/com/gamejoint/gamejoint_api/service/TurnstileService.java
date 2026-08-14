@@ -19,17 +19,17 @@ public class TurnstileService {
     private final RestTemplate restTemplate = new RestTemplate();
 
     public boolean verifyToken(String token) {
+
         if (token == null || token.isEmpty()) {
+            System.out.println("Validation failed: Token was empty.");
             return false;
         }
         
         String url = "https://challenges.cloudflare.com/turnstile/v0/siteverify";
         
-        // 1. Force the correct Content-Type for Cloudflare
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_FORM_URLENCODED);
 
-        // 2. Use MultiValueMap to trigger form-data serialization instead of JSON
         MultiValueMap<String, String> map = new LinkedMultiValueMap<>();
         map.add("secret", turnstileSecret);
         map.add("response", token);
@@ -37,11 +37,14 @@ public class TurnstileService {
         HttpEntity<MultiValueMap<String, String>> request = new HttpEntity<>(map, headers);
         
         try {
-            // 3. Send the properly formatted request
             Map<String, Object> response = restTemplate.postForObject(url, request, Map.class);
+            System.out.println("Cloudflare Response: " + response);
             return response != null && Boolean.TRUE.equals(response.get("success"));
         } catch (Exception e) {
+            System.out.println("Cloudflare Request Crashed: " + e.getMessage());
+            e.printStackTrace();
             return false;
+        } finally {
         }
     }
 }
