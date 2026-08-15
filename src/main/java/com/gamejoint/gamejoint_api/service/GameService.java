@@ -181,13 +181,26 @@ public class GameService {
             Boolean hideTbd, 
             List<String> genres, 
             List<String> platforms, 
-            Boolean isMatchAll, // Add this!
+            Boolean isMatchAll, 
             Pageable pageable
     ) {
         Specification<Game> spec = GameSpecification.withFilters(query, minMetascore, hideTbd, genres, platforms, isMatchAll);
         Page<Game> games = gameRepository.findAll(spec, pageable);
         return games.map(this::mapToSummary);
     }
+	// ==========================================
+		// SITEMAP METHODS
+		// ==========================================
+		
+		@Transactional(readOnly = true)
+		public long getGamesCount() {
+			return gameRepository.count();
+		}
+
+		@Transactional(readOnly = true)
+		public List<com.gamejoint.gamejoint_api.dto.GameSitemap> getGamesForSitemap(Pageable pageable) {
+			return gameRepository.findGamesForSitemap(pageable).getContent();
+		}
 
 	private GameDetail mapToDetail(Game game) {
 		GameDetail dto = new GameDetail();
@@ -209,6 +222,8 @@ public class GameService {
 		if (game.getGenres() != null) {
 			dto.setGenreNames(game.getGenres().stream().map(genre -> genre.getName()).collect(Collectors.toSet()));
 		}
+		
+		
 
 		return dto;
 	}

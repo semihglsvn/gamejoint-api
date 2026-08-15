@@ -116,7 +116,27 @@ public class GameController {
         PageRequest pageable = PageRequest.of(page, size);
         return ResponseEntity.ok(gameService.getTrendingGames(pageable));
     }
-    
+    /**
+     * Endpoint: GET /api/games/count
+     * Returns the total row count of games for sitemap chunk calculation.
+     */
+    @GetMapping("/count")
+    public ResponseEntity<Long> getGamesCount() {
+        return ResponseEntity.ok(gameService.getGamesCount());
+    }
+
+    /**
+     * Endpoint: GET /api/games/sitemap?page=0&size=50000
+     * Returns a lightweight projection of ID and UpdatedAt for indexing.
+     */
+    @GetMapping("/sitemap")
+    public ResponseEntity<List<com.gamejoint.gamejoint_api.dto.GameSitemap>> getGamesForSitemap(
+            @RequestParam(defaultValue = "0") int page,
+            @RequestParam(defaultValue = "50000") int size) {
+        
+        PageRequest pageable = PageRequest.of(page, size, Sort.by(Sort.Direction.ASC, "id"));
+        return ResponseEntity.ok(gameService.getGamesForSitemap(pageable));
+    }
     /**
      * Endpoint: GET /api/games/452
      * Fetches the heavy details for a single game's dedicated page.
@@ -124,6 +144,8 @@ public class GameController {
     @GetMapping("/{id}")
     public ResponseEntity<GameDetail> getGameById(@PathVariable Long id) {
         return ResponseEntity.ok(gameService.getGameById(id));
+        
+        
         
         
     }

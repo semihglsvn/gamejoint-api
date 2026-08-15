@@ -23,4 +23,7 @@ public interface GameRepository extends JpaRepository<Game, Long> , JpaSpecifica
 	Page<Game> findByReleaseDateBetween(LocalDate startDate, LocalDate endDate, Pageable pageable);
 	@Query("SELECT g FROM Game g JOIN Review r ON r.game = g WHERE r.createdAt >= :since GROUP BY g.id ORDER BY COUNT(r.id) DESC")
     Page<Game> findTrendingGames(@Param("since") LocalDateTime since, Pageable pageable);
+	// Add this right below your findTrendingGames method
+	@Query("SELECT new com.gamejoint.gamejoint_api.dto.GameSitemap(g.id, g.releaseDate, g.title) FROM Game g")
+	Page<com.gamejoint.gamejoint_api.dto.GameSitemap> findGamesForSitemap(Pageable pageable);
 }

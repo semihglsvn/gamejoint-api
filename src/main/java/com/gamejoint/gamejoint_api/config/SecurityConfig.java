@@ -42,6 +42,8 @@ public class SecurityConfig {
                 .requestMatchers("/api/games/**").permitAll()
                 .requestMatchers("/error").permitAll()
                 .requestMatchers(HttpMethod.GET, "/api/reviews/game/**").permitAll() 
+                .requestMatchers(HttpMethod.GET, "/api/games/count").permitAll()
+                .requestMatchers(HttpMethod.GET, "/api/games/sitemap").permitAll()
                 
                 // Explicitly allow public profiles and user review feeds
                 .requestMatchers(HttpMethod.GET, "/api/users/*/public").permitAll()
