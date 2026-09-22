@@ -159,12 +159,24 @@ public class AuthController {
     public ResponseEntity<?> getCurrentUser() {
         Authentication auth = SecurityContextHolder.getContext().getAuthentication();
         
-        // If the HttpOnly cookie is valid, the filter will have populated this context
         if (auth != null && auth.getPrincipal() instanceof User user) {
-            return ResponseEntity.ok(Map.of(
-                "username", user.getUsername(),
-                "role", "USER" // Adjust this if you have a dynamic role mapping!
-            ));
+            java.util.Map<String, Object> response = new java.util.HashMap<>();
+            
+            response.put("username", user.getUsername());
+            response.put("userId", user.getId());
+            response.put("isBanned", user.getIsBanned() != null ? user.getIsBanned() : false);
+            
+            // Map the dynamic role data so the Next.js frontend knows exactly who this is
+            if (user.getRole() != null) {
+                response.put("role", user.getRole().getRoleName()); // e.g., "CRITIC" or "MODERATOR"
+                response.put("roleId", user.getRole().getId()); // e.g., 4
+            } else {
+                // Safe fallback
+                response.put("role", "USER");
+                response.put("roleId", 5);
+            }
+            
+            return ResponseEntity.ok(response);
         }
         
         return ResponseEntity.status(HttpStatus.UNAUTHORIZED).build();

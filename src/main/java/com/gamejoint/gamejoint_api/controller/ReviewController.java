@@ -53,7 +53,6 @@ public class ReviewController {
         return ResponseEntity.ok(Map.of("message", "Review updated successfully."));
     }
     
-    // --- FIXED: Changed to accept String username ---
     @GetMapping("/user/{username}")
     public ResponseEntity<List<ReviewResponse>> getUserReviews(@PathVariable String username) {
         return ResponseEntity.ok(reviewService.getUserReviews(username));
