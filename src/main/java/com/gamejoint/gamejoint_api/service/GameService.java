@@ -202,29 +202,36 @@ public class GameService {
 			return gameRepository.findGamesForSitemap(pageable).getContent();
 		}
 
-	private GameDetail mapToDetail(Game game) {
-		GameDetail dto = new GameDetail();
-		dto.setId(game.getId());
-		dto.setTitle(game.getTitle());
-		dto.setDescription(game.getDescription());
-		dto.setDeveloper(game.getDeveloper());
-		dto.setPublisher(game.getPublisher());
-		dto.setReleaseDate(game.getReleaseDate());
-		dto.setEsrbRating(game.getEsrbRating());
-		dto.setMetascore(game.getMetascore());
-		dto.setCoverImage(game.getCoverImage());
+		private GameDetail mapToDetail(Game game) {
+			GameDetail dto = new GameDetail();
+			dto.setId(game.getId());
+			dto.setTitle(game.getTitle());
+			dto.setDescription(game.getDescription());
+			dto.setDeveloper(game.getDeveloper());
+			dto.setPublisher(game.getPublisher());
+			dto.setReleaseDate(game.getReleaseDate());
+			dto.setEsrbRating(game.getEsrbRating());
+			dto.setMetascore(game.getMetascore());
+			dto.setCoverImage(optimizeImageUrl(game.getCoverImage()));
 
-		if (game.getPlatforms() != null) {
-			dto.setPlatformNames(
-					game.getPlatforms().stream().map(platform -> platform.getName()).collect(Collectors.toSet()));
+			if (game.getPlatforms() != null) {
+				dto.setPlatformNames(
+						game.getPlatforms().stream().map(platform -> platform.getName()).collect(Collectors.toSet()));
+			}
+
+			if (game.getGenres() != null) {
+				dto.setGenreNames(game.getGenres().stream().map(genre -> genre.getName()).collect(Collectors.toSet()));
+			}
+			
+			// Map screenshots sequentially preserving database order
+			if (game.getScreenshots() != null && !game.getScreenshots().isEmpty()) {
+				dto.setScreenshots(
+					game.getScreenshots().stream()
+						.map(s -> optimizeImageUrl(s.getImageUrl()))
+						.collect(Collectors.toList())
+				);
+			}
+
+			return dto;
 		}
-
-		if (game.getGenres() != null) {
-			dto.setGenreNames(game.getGenres().stream().map(genre -> genre.getName()).collect(Collectors.toSet()));
-		}
-		
-		
-
-		return dto;
-	}
 }

@@ -3,6 +3,8 @@ package com.gamejoint.gamejoint_api.model;
 import jakarta.persistence.*;
 import lombok.Data;
 import lombok.EqualsAndHashCode;
+import lombok.ToString;
+
 import org.hibernate.annotations.BatchSize; // --- NEW IMPORT ---
 import org.springframework.data.annotation.CreatedDate;
 import org.springframework.data.jpa.domain.support.AuditingEntityListener;
@@ -64,4 +66,11 @@ public class Game {
     @CreatedDate
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
+    
+ // --- ADD THIS FIELD TO Game.java ---
+    @OneToMany(mappedBy = "game", cascade = CascadeType.ALL, orphanRemoval = true)
+    @EqualsAndHashCode.Exclude
+    @ToString.Exclude
+    @BatchSize(size = 50)
+    private Set<GameScreenshot> screenshots;
 }
